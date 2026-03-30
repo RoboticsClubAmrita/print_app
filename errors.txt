@@ -1,0 +1,18 @@
+src/components/app-tabs.tsx(9,25): error TS2367: This comparison appears to be unintentional because the types 'ColorSchemeName' and '"unspecified"' have no overlap.
+src/components/app-tabs.tsx(9,25): error TS2538: Type 'null' cannot be used as an index type.
+src/components/app-tabs.tsx(9,25): error TS2538: Type 'undefined' cannot be used as an index type.
+src/components/app-tabs.tsx(17,29): error TS2339: Property 'Label' does not exist on type '((props: NativeTabTriggerProps) => null) & { TabBar: (props: NativeTabsTriggerTabBarProps) => ReactNode; }'.
+src/components/app-tabs.tsx(17,60): error TS2339: Property 'Label' does not exist on type '((props: NativeTabTriggerProps) => null) & { TabBar: (props: NativeTabsTriggerTabBarProps) => ReactNode; }'.
+src/components/app-tabs.tsx(18,29): error TS2339: Property 'Icon' does not exist on type '((props: NativeTabTriggerProps) => null) & { TabBar: (props: NativeTabsTriggerTabBarProps) => ReactNode; }'.
+src/components/app-tabs.tsx(25,29): error TS2339: Property 'Label' does not exist on type '((props: NativeTabTriggerProps) => null) & { TabBar: (props: NativeTabsTriggerTabBarProps) => ReactNode; }'.
+src/components/app-tabs.tsx(25,63): error TS2339: Property 'Label' does not exist on type '((props: NativeTabTriggerProps) => null) & { TabBar: (props: NativeTabsTriggerTabBarProps) => ReactNode; }'.
+src/components/app-tabs.tsx(26,29): error TS2339: Property 'Icon' does not exist on type '((props: NativeTabTriggerProps) => null) & { TabBar: (props: NativeTabsTriggerTabBarProps) => ReactNode; }'.
+src/components/app-tabs.web.tsx(28,38): error TS2322: Type '"/explore"' is not assignable to type 'RelativePathString | ExternalPathString | "/" | `/?${string}` | `/#${string}` | "/payment" | `/payment?${string}` | `/payment#${string}` | "/_sitemap" | `/_sitemap?${string}` | `/_sitemap#${string}` | ... 35 more ... | undefined'.
+src/components/app-tabs.web.tsx(53,25): error TS2367: This comparison appears to be unintentional because the types 'ColorSchemeName' and '"unspecified"' have no overlap.
+src/components/app-tabs.web.tsx(53,25): error TS2538: Type 'null' cannot be used as an index type.
+src/components/app-tabs.web.tsx(53,25): error TS2538: Type 'undefined' cannot be used as an index type.
+src/components/app-tabs.web.tsx(69,15): error TS2322: Type '{ ios: string; web: string; }' is not assignable to type 'SFSymbols7_0'.
+src/components/ui/collapsible.tsx(22,13): error TS2322: Type '{ ios: string; android: string; web: string; }' is not assignable to type 'SFSymbols7_0'.
+src/hooks/use-theme.ts(11,17): error TS2367: This comparison appears to be unintentional because the types 'ColorSchemeName' and '"unspecified"' have no overlap.
+src/hooks/use-theme.ts(13,17): error TS2538: Type 'null' cannot be used as an index type.
+src/hooks/use-theme.ts(13,17): error TS2538: Type 'undefined' cannot be used as an index type.
