@@ -88,7 +88,7 @@ export default function QueueScreen() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'COLLECTED': return colors.success;
-      case 'PRINTED': return colors.primary;
+      case 'COMPLETED': return colors.primary;
       case 'PRINTED_PENDING_STACK': return colors.warning;
       case 'PROCESSING': 
       case 'PRINTING': return colors.secondary;
@@ -110,7 +110,7 @@ export default function QueueScreen() {
           <Text style={[styles.statusBadge, { color: getStatusColor(item.status), borderColor: getStatusColor(item.status) }]}>
             {item.status}
           </Text>
-          {item.status !== 'COLLECTED' && item.status !== 'PRINTING' && item.status !== 'PRINTED' && item.status !== 'PRINTED_PENDING_STACK' && (
+          {item.status !== 'COLLECTED' && item.status !== 'PRINTING' && item.status !== 'COMPLETED' && item.status !== 'PRINTED_PENDING_STACK' && (
             <TouchableOpacity onPress={() => handleDeleteJob(item._id)} style={styles.deleteButton}>
               <Ionicons name="trash-outline" size={20} color={colors.error || '#FF3B30'} />
             </TouchableOpacity>
@@ -122,7 +122,7 @@ export default function QueueScreen() {
         <Text style={styles.detailText}>Copies: {item.copies || 1}</Text>
         <Text style={styles.detailText}>Cost: ₹{item.totalCost || 0}</Text>
       </View>
-      {item.status === 'PRINTED' && (
+      {item.status === 'COMPLETED' && (
         <TouchableOpacity style={styles.collectButton} onPress={() => requestCollect(item._id)}>
             <Text style={styles.collectButtonText}>Collect Materials</Text>
         </TouchableOpacity>
@@ -152,7 +152,7 @@ export default function QueueScreen() {
         <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
                 <Text style={styles.modalTitle}>Enter OTP</Text>
-                <Text style={styles.modalDesc}>Please check your email for the 4-digit collection OTP.</Text>
+                <Text style={styles.modalDesc}>A 4-digit OTP has been sent to your registered email. Enter it below to collect your printed materials.</Text>
                 <TextInput style={styles.otpInput} keyboardType="number-pad" maxLength={4} value={otp} onChangeText={setOtp} placeholder="0000" placeholderTextColor={colors.textMuted}/>
                 <View style={styles.modalActions}>
                     <TouchableOpacity style={styles.modalBtnCancel} onPress={() => setOtpModalVisible(false)}><Text style={styles.modalBtnTextCancel}>Cancel</Text></TouchableOpacity>
