@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 
 // Assuming the backend is running locally on port 5000 or similar
 // Replace with correct IP address for local network testing or deployed URL
-const BASE_URL = 'http://10.66.209.18:5000/api'; 
+const BASE_URL = 'http://13.60.246.95:5000/api'; 
 
 export const api = axios.create({
   baseURL: BASE_URL,

@@ -7,6 +7,7 @@ import { GlassCard } from '../components/GlassCard';
 import { CustomButton } from '../components/CustomButton';
 import { colors } from '../theme/colors';
 import { api } from '../api/client';
+import RazorpayCheckout from 'react-native-razorpay';
 
 export default function PaymentScreen() {
   const params = useLocalSearchParams();
@@ -58,8 +59,32 @@ export default function PaymentScreen() {
       const order = orderRes.data?.DATA;
       
       if (order && order.orderId) {
-        Alert.alert('Success', `Backend Razorpay Order created: ${order.orderId}. Native SDK integration required to open Gateway.`);
-        router.replace('/(tabs)/queue');
+        const amountInPaise = params.totalCost ? Math.round(parseFloat(params.totalCost as string) * 100).toString() : '100';
+
+        const options = {
+          description: 'Print Job Payment',
+          image: 'https://i.imgur.com/3g7nmJC.jpg',
+          currency: 'INR',
+          key: process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID || '',
+          amount: amountInPaise,
+          name: 'Campus Print',
+          order_id: order.orderId,
+          prefill: {
+            email: 'student@campus.edu',
+            contact: '9999999999',
+            name: 'Student'
+          },
+          theme: {color: colors.primary}
+        };
+
+        RazorpayCheckout.open(options).then((data: any) => {
+          Alert.alert('Success', `Payment successful! Payment ID: ${data.razorpay_payment_id}`);
+          router.replace('/(tabs)/queue');
+        }).catch((error: any) => {
+          console.log('Razorpay Error:', error);
+          Alert.alert('Payment Error', error.description || error.message || 'Payment cancelled or failed');
+        });
+
       } else {
         throw new Error("Failed to generate Razorpay Order");
       }
