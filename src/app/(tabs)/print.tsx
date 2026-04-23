@@ -18,7 +18,7 @@ const FALLBACK_PRICING = {
 export default function PrintConfigScreen() {
   const router = useRouter();
   const [file, setFile] = useState<any>(null);
-  const [pageCount, setPageCount] = useState<number>(0);
+  const [pageCount, setPageCount] = useState<string>('');
   
   const [isColor, setIsColor] = useState(false);
   const [isDoubleSided, setIsDoubleSided] = useState(false);
@@ -67,8 +67,21 @@ export default function PrintConfigScreen() {
     calculateCost();
   }, [pageCount, isColor, isDoubleSided, copies, serverPrices]);
 
+  const getMimeType = (fileName: string): string => {
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    switch (ext) {
+      case 'pdf': return 'application/pdf';
+      case 'doc': return 'application/msword';
+      case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'jpg':
+      case 'jpeg': return 'image/jpeg';
+      case 'png': return 'image/png';
+      default: return 'application/octet-stream';
+    }
+  };
+
   const calculateCost = () => {
-    let pages = pageCount;
+    let pages = parseInt(pageCount) || 0;
     let copyNum = parseInt(copies) || 1;
     if (pages <= 0 || copyNum <= 0) {
       setTotalCost(0);
@@ -105,19 +118,6 @@ export default function PrintConfigScreen() {
     'image/png',
   ];
 
-  const getMimeType = (fileName: string): string => {
-    const ext = fileName.split('.').pop()?.toLowerCase();
-    switch (ext) {
-      case 'pdf': return 'application/pdf';
-      case 'doc': return 'application/msword';
-      case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      case 'jpg':
-      case 'jpeg': return 'image/jpeg';
-      case 'png': return 'image/png';
-      default: return 'application/octet-stream';
-    }
-  };
-
   const pickDocument = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -127,8 +127,12 @@ export default function PrintConfigScreen() {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const pickedFile = result.assets[0];
-        
-        await uploadAndParseFile(pickedFile);
+        const mimeType = pickedFile.mimeType || getMimeType(pickedFile.name);
+        setFile({ name: pickedFile.name, uri: pickedFile.uri, mimeType });
+        // For images, default to 1 page
+        if (mimeType.startsWith('image/')) {
+          setPageCount('1');
+        }
       }
     } catch (err) {
       console.log('Error picking doc', err);
@@ -136,59 +140,14 @@ export default function PrintConfigScreen() {
     }
   };
 
-  const [isUploading, setIsUploading] = useState(false);
-
-  const uploadAndParseFile = async (pickedFile: any) => {
-    setIsUploading(true);
-    setPageCount(0);
-    try {
-      const userId = await SecureStore.getItemAsync('userId');
-      const token = await SecureStore.getItemAsync('userToken');
-      const fileMimeType = pickedFile.mimeType || getMimeType(pickedFile.name);
-
-      const formData = new FormData();
-      formData.append('file', {
-        uri: pickedFile.uri,
-        name: pickedFile.name,
-        type: fileMimeType,
-      } as any);
-      formData.append('userId', userId || 'unknown');
-
-      const uploadUrl = `${api.defaults.baseURL}/files/upload`;
-      const response = await fetch(uploadUrl, {
-        method: 'POST',
-        headers: {
-          'Bypass-Tunnel-Reminder': 'true',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: formData,
-      });
-      
-      const responseData = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(responseData.MESSAGE || responseData.message || 'Server returned an error');
-      }
-      
-      const fileId = responseData.DATA?.fileId;
-      const pages = responseData.DATA?.metadata?.totalPages || 1;
-
-      if (!fileId) throw new Error("No file ID returned from server");
-
-      setFile({ name: pickedFile.name, uri: pickedFile.uri, fileId });
-      setPageCount(pages);
-      
-    } catch (e: any) {
-      console.log('Upload error', e.message);
-      Alert.alert('Upload Error', e.message || 'Failed to upload file');
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
   const proceedToPayment = () => {
     if (!file) {
       Alert.alert('Validation', 'Please select a document first.');
+      return;
+    }
+    const pages = parseInt(pageCount) || 0;
+    if (pages <= 0) {
+      Alert.alert('Validation', 'Please enter the number of pages.');
       return;
     }
     if (!selectedLocation) {
@@ -199,9 +158,10 @@ export default function PrintConfigScreen() {
     router.push({
       pathname: '/payment',
       params: {
-        fileId: file.fileId,
+        fileUri: file.uri,
         fileName: file.name,
-        pageCount,
+        fileMimeType: file.mimeType,
+        pageCount: pages,
         copies: parseInt(copies) || 1,
         color: isColor ? 'true' : 'false',
         doubleSided: isDoubleSided ? 'true' : 'false',
@@ -216,24 +176,19 @@ export default function PrintConfigScreen() {
       <Text style={styles.headerTitle}>Print Document</Text>
       
       <GlassCard style={styles.uploadCard}>
-        {isUploading ? (
-          <View style={styles.uploadPlaceholder}>
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={styles.uploadText}>Uploading and parsing file...</Text>
-          </View>
-        ) : file ? (
+        {file ? (
           <View style={styles.fileSelectedRow}>
             <Ionicons name="document" size={32} color={colors.primary} />
             <View style={{ flex: 1, marginLeft: 16 }}>
               <Text style={styles.fileName}>{file.name}</Text>
-              <Text style={styles.filePages}>{pageCount} Pages detected</Text>
+              <Text style={styles.filePages}>Ready to print</Text>
             </View>
             <CustomButton title="Change" variant="outline" onPress={pickDocument} style={{ height: 32, paddingHorizontal: 16, marginTop: 0 }} />
           </View>
         ) : (
           <View style={styles.uploadPlaceholder}>
-            <Ionicons name="cloud-upload-outline" size={48} color={colors.textMuted} />
-            <Text style={styles.uploadText}>Upload a file to print (PDF, Word, JPG, PNG)</Text>
+            <Ionicons name="document-attach-outline" size={48} color={colors.textMuted} />
+            <Text style={styles.uploadText}>Select a file to print (PDF, Word, JPG, PNG)</Text>
             <CustomButton title="Browse Files" onPress={pickDocument} style={{ marginTop: 16, width: '100%' }} />
           </View>
         )}
@@ -253,6 +208,15 @@ export default function PrintConfigScreen() {
         </View>
         <View style={styles.divider} />
         
+        <InputField
+          label="Number of Pages"
+          keyboardType="number-pad"
+          value={pageCount}
+          onChangeText={setPageCount}
+          icon="document-text-outline"
+        />
+        <View style={styles.divider} />
+
         <InputField
           label="Number of Copies"
           keyboardType="number-pad"

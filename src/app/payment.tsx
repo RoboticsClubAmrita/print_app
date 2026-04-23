@@ -22,19 +22,48 @@ export default function PaymentScreen() {
     
     try {
       const userId = await SecureStore.getItemAsync('userId');
+      const token = await SecureStore.getItemAsync('userToken');
       if (!userId) throw new Error("User not logged in");
       
-      // File was already uploaded in the Print screen — use the fileId passed via params
-      const fileId = params.fileId;
-      if (!fileId) throw new Error("No file ID found. Please re-upload your document.");
-
       const locationId = params.locationId;
       if (!locationId) throw new Error("No location ID found. Please go back and select a location.");
 
-      // Create the Print Job mapping the correct schema types
+      // 1. Upload the file to server now
+      const fileUri = params.fileUri as string;
+      const fileName = params.fileName as string;
+      const fileMimeType = params.fileMimeType as string;
+      if (!fileUri || !fileName) throw new Error("No file selected. Please go back and pick a document.");
+
+      const formData = new FormData();
+      formData.append('file', {
+        uri: fileUri,
+        name: fileName,
+        type: fileMimeType || 'application/octet-stream',
+      } as any);
+      formData.append('userId', userId);
+
+      const uploadUrl = `${api.defaults.baseURL}/files/upload`;
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'Bypass-Tunnel-Reminder': 'true',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      const uploadData = await uploadResponse.json();
+      if (!uploadResponse.ok) {
+        throw new Error(uploadData.MESSAGE || uploadData.message || 'File upload failed');
+      }
+
+      const fileId = uploadData.DATA?.fileId;
+      if (!fileId) throw new Error("No file ID returned from server");
+
+      // 2. Create the Print Job
       const jobPayload = {
         userId,
-        fileId: fileId,
+        fileId,
         locationId: locationId,
         colorMode: params.color === 'true' ? 'COLOR' : 'BW',
         printSide: params.doubleSided === 'true' ? 'DOUBLE' : 'SINGLE',
