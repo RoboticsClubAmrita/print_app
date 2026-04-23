@@ -28,13 +28,8 @@ export default function PaymentScreen() {
       const fileId = params.fileId;
       if (!fileId) throw new Error("No file ID found. Please re-upload your document.");
 
-      // Fetch an available location from backend to satisfy the job requirement
-      const locRes = await api.get('/hardware/locations');
-      const locations = locRes.data?.DATA || [];
-      if (locations.length === 0) {
-         throw new Error("No hardware locations registered in the backend!");
-      }
-      const locationId = locations[0]._id;
+      const locationId = params.locationId;
+      if (!locationId) throw new Error("No location ID found. Please go back and select a location.");
 
       // Create the Print Job mapping the correct schema types
       const jobPayload = {

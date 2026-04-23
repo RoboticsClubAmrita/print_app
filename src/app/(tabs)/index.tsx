@@ -11,7 +11,7 @@ import { api } from '../../api/client';
 export default function HomeScreen() {
   const router = useRouter();
   const [userName, setUserName] = useState('');
-  const [stats, setStats] = useState({ pending: 0, completed: 0 });
+  const [stats, setStats] = useState({ pending: 0, completed: 0, balance: 0 });
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchDashboard = async () => {
@@ -20,8 +20,9 @@ export default function HomeScreen() {
       if (userId) {
         // Fetch User Info
         const userRes = await api.get(`/users/${userId}`);
-        if (userRes.data?.DATA?.name) {
+        if (userRes.data?.DATA) {
           setUserName(userRes.data.DATA.name);
+          setStats(prev => ({ ...prev, balance: userRes.data.DATA.balance || 0 }));
         }
 
         // Fetch User jobs to compute stats
@@ -31,7 +32,7 @@ export default function HomeScreen() {
         const pendingCount = jobsList.filter((j: any) => j.status === 'PENDING' || j.status === 'QUEUED').length;
         const completedCount = jobsList.filter((j: any) => j.status === 'COMPLETED').length;
         
-        setStats({ pending: pendingCount, completed: completedCount });
+        setStats(prev => ({ ...prev, pending: pendingCount, completed: completedCount }));
       }
     } catch (err) {
       console.log('Error fetching dashboard', err);
@@ -68,11 +69,20 @@ export default function HomeScreen() {
         <Ionicons name="notifications-outline" size={28} color={colors.text} />
       </View>
 
-      <GlassCard intensity={40} style={styles.balanceCard}>
-        <Ionicons name="wallet-outline" size={24} color={colors.secondary} style={{ marginBottom: 8 }} />
-        <Text style={styles.balanceLabel}>Total Jobs Completed</Text>
-        <Text style={styles.balanceAmount}>{stats.completed}</Text>
-      </GlassCard>
+      <View style={{ flexDirection: 'row', gap: 16, marginBottom: 32 }}>
+        <GlassCard intensity={40} style={[styles.balanceCard, { flex: 1 }]}>
+          <Ionicons name="wallet-outline" size={24} color={stats.balance > 0 ? colors.error : colors.secondary} style={{ marginBottom: 8 }} />
+          <Text style={styles.balanceLabel}>Outstanding Fees</Text>
+          <Text style={[styles.balanceAmount, stats.balance > 0 ? { color: colors.error } : { color: colors.secondary }]}>₹{stats.balance.toFixed(2)}</Text>
+          <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 4 }}>₹10 per 5 min stack time</Text>
+        </GlassCard>
+        
+        <GlassCard intensity={40} style={[styles.balanceCard, { flex: 1 }]}>
+          <Ionicons name="checkbox-outline" size={24} color={colors.primary} style={{ marginBottom: 8 }} />
+          <Text style={styles.balanceLabel}>Jobs Completed</Text>
+          <Text style={styles.balanceAmount}>{stats.completed}</Text>
+        </GlassCard>
+      </View>
 
       <Text style={styles.sectionTitle}>Quick Actions</Text>
       <View style={styles.actionGrid}>
@@ -99,9 +109,9 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 },
   greeting: { fontSize: 28, fontWeight: '800', color: colors.text, marginBottom: 4 },
   subtitle: { fontSize: 16, color: colors.textMuted },
-  balanceCard: { marginBottom: 32, paddingVertical: 24 },
-  balanceLabel: { color: colors.textMuted, fontSize: 16, marginBottom: 8 },
-  balanceAmount: { color: colors.text, fontSize: 40, fontWeight: '800' },
+  balanceCard: { paddingVertical: 20, paddingHorizontal: 16, alignItems: 'center' },
+  balanceLabel: { color: colors.textMuted, fontSize: 14, marginBottom: 8, textAlign: 'center' },
+  balanceAmount: { color: colors.text, fontSize: 32, fontWeight: '800' },
   sectionTitle: { fontSize: 20, fontWeight: '700', color: colors.text, marginBottom: 16 },
   actionGrid: { flexDirection: 'row', gap: 16 },
   actionCard: { flex: 1, alignItems: 'center', padding: 16 },

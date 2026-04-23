@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Switch, Alert, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Switch, Alert, Platform, ActivityIndicator, Modal, TouchableOpacity, FlatList } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,8 +10,8 @@ import { CustomButton } from '../../components/CustomButton';
 import { InputField } from '../../components/InputField';
 import { colors } from '../../theme/colors';
 
-const PRICING = {
-  blackAndWhite: { single: 2, double: 1.5 }, // per page
+const FALLBACK_PRICING = {
+  blackAndWhite: { single: 1, double: 1.5 }, // per page
   color: { single: 10, double: 8 }
 };
 
@@ -27,6 +27,11 @@ export default function PrintConfigScreen() {
   const [outstandingBalance, setOutstandingBalance] = useState(0);
   const [totalCost, setTotalCost] = useState(0);
 
+  const [serverPrices, setServerPrices] = useState<any[]>([]);
+  const [locations, setLocations] = useState<any[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState<string>("");
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+
   useEffect(() => {
     (async () => {
         try {
@@ -38,12 +43,29 @@ export default function PrintConfigScreen() {
         } catch (err) {
             console.log("Failed to fetch user balance", err);
         }
+
+        try {
+            const priceRes = await api.get('/pricing/all');
+            const prices = priceRes.data?.DATA?.prices || [];
+            setServerPrices(prices);
+        } catch (err) {
+            console.log("Failed to fetch pricing", err);
+        }
+
+        try {
+            const locRes = await api.get('/hardware/locations');
+            const locs = locRes.data?.DATA || [];
+            setLocations(locs);
+            if (locs.length > 0) setSelectedLocation(locs[0]._id);
+        } catch (err) {
+            console.log("Failed to fetch locations", err);
+        }
     })();
   }, []);
 
   useEffect(() => {
     calculateCost();
-  }, [pageCount, isColor, isDoubleSided, copies]);
+  }, [pageCount, isColor, isDoubleSided, copies, serverPrices]);
 
   const calculateCost = () => {
     let pages = pageCount;
@@ -53,10 +75,24 @@ export default function PrintConfigScreen() {
       return;
     }
 
-    const type = isColor ? PRICING.color : PRICING.blackAndWhite;
-    const rate = isDoubleSided ? type.double : type.single;
+    let rate = 0;
     
-    // Total physical papers used logic if double sided, but we'll charge per logical page
+    if (serverPrices.length > 0) {
+      const type = isColor ? 'colour' : 'bw';
+      const side = isDoubleSided ? 'double' : 'single';
+      // Default to A4 as it is currently the standard upload size
+      const priceDoc = serverPrices.find(p => p.type === type && p.side === side && p.size === 'A4');
+      if (priceDoc && priceDoc.price !== undefined) {
+         rate = priceDoc.price;
+      } else {
+         rate = 2; // Fallback safe price if specific config is not found in DB
+      }
+    } else {
+      // Fallback if API hasn't loaded yet
+      const type = isColor ? FALLBACK_PRICING.color : FALLBACK_PRICING.blackAndWhite;
+      rate = isDoubleSided ? type.double : type.single;
+    }
+
     let finalCost = pages * rate * copyNum;
     setTotalCost(finalCost + outstandingBalance);
   };
@@ -155,6 +191,10 @@ export default function PrintConfigScreen() {
       Alert.alert('Validation', 'Please select a document first.');
       return;
     }
+    if (!selectedLocation) {
+      Alert.alert('Validation', 'Please select an available printer location.');
+      return;
+    }
     
     router.push({
       pathname: '/payment',
@@ -165,7 +205,8 @@ export default function PrintConfigScreen() {
         copies: parseInt(copies) || 1,
         color: isColor ? 'true' : 'false',
         doubleSided: isDoubleSided ? 'true' : 'false',
-        totalCost: totalCost.toString()
+        totalCost: totalCost.toString(),
+        locationId: selectedLocation
       }
     });
   };
@@ -219,6 +260,87 @@ export default function PrintConfigScreen() {
           onChangeText={setCopies}
           icon="copy-outline"
         />
+
+        <View style={styles.divider} />
+        
+        <Text style={[styles.switchLabel, { marginBottom: 8 }]}>Select Printer Location</Text>
+        {locations.length > 0 ? (
+          <>
+            <TouchableOpacity
+              style={styles.dropdownButton}
+              onPress={() => setShowLocationDropdown(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="location-outline" size={20} color={colors.primary} style={{ marginRight: 10 }} />
+              <Text style={styles.dropdownButtonText} numberOfLines={1}>
+                {locations.find(l => l._id === selectedLocation)?.name || 'Select a location'}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <Modal
+              visible={showLocationDropdown}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setShowLocationDropdown(false)}
+            >
+              <TouchableOpacity
+                style={styles.modalOverlay}
+                activeOpacity={1}
+                onPress={() => setShowLocationDropdown(false)}
+              >
+                <View style={styles.modalContent}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>Select Printer Location</Text>
+                    <TouchableOpacity onPress={() => setShowLocationDropdown(false)}>
+                      <Ionicons name="close-circle" size={28} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  </View>
+                  <FlatList
+                    data={locations}
+                    keyExtractor={(item) => item._id}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={[
+                          styles.dropdownItem,
+                          selectedLocation === item._id && styles.dropdownItemSelected,
+                        ]}
+                        onPress={() => {
+                          setSelectedLocation(item._id);
+                          setShowLocationDropdown(false);
+                        }}
+                      >
+                        <Ionicons
+                          name={selectedLocation === item._id ? 'radio-button-on' : 'radio-button-off'}
+                          size={22}
+                          color={selectedLocation === item._id ? colors.primary : colors.textMuted}
+                          style={{ marginRight: 12 }}
+                        />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[
+                            styles.dropdownItemText,
+                            selectedLocation === item._id && { color: colors.primary, fontWeight: '700' },
+                          ]}>
+                            {item.name}
+                          </Text>
+                          {item.address && (
+                            <Text style={styles.dropdownItemAddress}>{item.address}</Text>
+                          )}
+                        </View>
+                        {selectedLocation === item._id && (
+                          <Ionicons name="checkmark-circle" size={22} color={colors.primary} />
+                        )}
+                      </TouchableOpacity>
+                    )}
+                    style={{ maxHeight: 350 }}
+                  />
+                </View>
+              </TouchableOpacity>
+            </Modal>
+          </>
+        ) : (
+          <Text style={{ color: colors.error, fontSize: 14 }}>No printer locations available. Contact admin.</Text>
+        )}
       </GlassCard>
 
       <GlassCard style={styles.costCard}>
@@ -271,4 +393,76 @@ const styles = StyleSheet.create({
   costDetailValue: { color: colors.text, fontSize: 14, fontWeight: '600' },
   costLabel: { color: colors.textMuted, fontSize: 18 },
   costValue: { color: colors.text, fontSize: 28, fontWeight: '800' },
+
+  dropdownButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginVertical: 4,
+  },
+  dropdownButtonText: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '500',
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    width: '100%',
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.glassBorder,
+    padding: 20,
+    maxHeight: '70%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginBottom: 6,
+  },
+  dropdownItemSelected: {
+    backgroundColor: 'rgba(108, 93, 211, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(108, 93, 211, 0.3)',
+  },
+  dropdownItemText: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  dropdownItemAddress: {
+    color: colors.textDim,
+    fontSize: 12,
+    marginTop: 2,
+  },
 });
