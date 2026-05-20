@@ -75,8 +75,7 @@ export default function LoginScreen() {
         </GlassCard>
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Don't have an account?</Text>
-          <CustomButton title="Create an Account" variant="outline" onPress={() => router.push('/auth/signup')} />
+          <Text style={styles.footerText}>Contact your administrator for account access.</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
