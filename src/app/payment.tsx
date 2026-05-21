@@ -13,12 +13,11 @@ export default function PaymentScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [statusText, setStatusText] = useState('');
 
-  // Since Razorpay requires native modules which cannot simply trigger here without config,
-  // we will mock the payment flow for the frontend, but interact with actual backend /jobs API.
-  
   const handleCheckout = async () => {
     setLoading(true);
+    setStatusText('Preparing...');
     
     try {
       const userId = await SecureStore.getItemAsync('userId');
@@ -28,39 +27,13 @@ export default function PaymentScreen() {
       const locationId = params.locationId;
       if (!locationId) throw new Error("No location ID found. Please go back and select a location.");
 
-      // 1. Upload the file to server now
-      const fileUri = params.fileUri as string;
-      const fileName = params.fileName as string;
-      const fileMimeType = params.fileMimeType as string;
-      if (!fileUri || !fileName) throw new Error("No file selected. Please go back and pick a document.");
+      // File was already uploaded on the Print screen — use the fileId directly
+      const fileId = params.fileId as string;
+      if (!fileId) throw new Error("File was not uploaded. Please go back and select a document again.");
 
-      const formData = new FormData();
-      formData.append('file', {
-        uri: fileUri,
-        name: fileName,
-        type: fileMimeType || 'application/octet-stream',
-      } as any);
-      formData.append('userId', userId);
+      setStatusText('Creating print job...');
 
-      const uploadUrl = `${api.defaults.baseURL}/files/upload`;
-      const uploadResponse = await fetch(uploadUrl, {
-        method: 'POST',
-        headers: {
-          'Bypass-Tunnel-Reminder': 'true',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: formData,
-      });
-
-      const uploadData = await uploadResponse.json();
-      if (!uploadResponse.ok) {
-        throw new Error(uploadData.MESSAGE || uploadData.message || 'File upload failed');
-      }
-
-      const fileId = uploadData.DATA?.fileId;
-      if (!fileId) throw new Error("No file ID returned from server");
-
-      // 2. Create the Print Job
+      // 1. Create the Print Job
       const jobPayload = {
         userId,
         fileId,
@@ -75,21 +48,25 @@ export default function PaymentScreen() {
 
       const jobRes = await api.post('/jobs/create', jobPayload);
       const jobId = jobRes.data?.DATA?.jobId;
-      const totalCost = jobRes.data?.DATA?.totalCost || params.totalCost;
       if (!jobId) throw new Error(jobRes.data?.MESSAGE || "Failed to create print job");
 
-      // 3. Create the Razorpay Order
+      setStatusText('Creating payment order...');
+
+      // 2. Create the Razorpay Order
       const orderRes = await api.post('/payments/create-order', { jobId });
       const order = orderRes.data?.DATA;
       
       if (order && order.orderId) {
-        const amountInPaise = params.totalCost ? Math.round(parseFloat(params.totalCost as string) * 100).toString() : '100';
+        // Use the amount from the backend order (accurate cost based on detected pages)
+        const amountInPaise = order.amountInPaise
+          ? String(order.amountInPaise)
+          : Math.round((order.amount || parseFloat(params.totalCost as string) || 1) * 100).toString();
 
         const options = {
           description: 'Print Job Payment',
           image: 'https://i.imgur.com/3g7nmJC.jpg',
-          currency: 'INR',
-          key: process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID || '',
+          currency: order.currency || 'INR',
+          key: order.keyId || process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID || '',
           amount: amountInPaise,
           name: 'Campus Print',
           order_id: order.orderId,
@@ -98,19 +75,36 @@ export default function PaymentScreen() {
             contact: '9999999999',
             name: 'Student'
           },
-          theme: {color: colors.primary}
+          theme: { color: colors.primary }
         };
 
-        RazorpayCheckout.open(options).then((data: any) => {
+        setStatusText('Opening payment gateway...');
+
+        try {
+          const data: any = await RazorpayCheckout.open(options);
+
+          setStatusText('Verifying payment...');
+
+          // 3. Verify payment with backend
+          try {
+            await api.post('/payments/verify', {
+              razorpay_order_id: data.razorpay_order_id || order.orderId,
+              razorpay_payment_id: data.razorpay_payment_id,
+              razorpay_signature: data.razorpay_signature,
+            });
+          } catch (verifyErr: any) {
+            console.log('Payment verification call failed (webhook will handle):', verifyErr.message);
+          }
+
           Alert.alert('Success', `Payment successful! Payment ID: ${data.razorpay_payment_id}`);
           router.replace('/(tabs)/queue');
-        }).catch((error: any) => {
-          console.log('Razorpay Error:', error);
-          Alert.alert('Payment Error', error.description || error.message || 'Payment cancelled or failed');
-        });
+        } catch (rzpError: any) {
+          console.log('Razorpay Error:', rzpError);
+          Alert.alert('Payment Error', rzpError.description || rzpError.message || 'Payment cancelled or failed');
+        }
 
       } else {
-        throw new Error("Failed to generate Razorpay Order");
+        throw new Error(orderRes.data?.MESSAGE || "Failed to generate Razorpay Order");
       }
 
     } catch (err: any) {
@@ -118,6 +112,7 @@ export default function PaymentScreen() {
       Alert.alert('Payment Error', err.response?.data?.MESSAGE || err.message || 'Could not reach backend');
     } finally {
       setLoading(false);
+      setStatusText('');
     }
   };
 
@@ -156,6 +151,13 @@ export default function PaymentScreen() {
         <Ionicons name="checkmark-circle" size={24} color={colors.primary} />
       </GlassCard>
 
+      {statusText ? (
+        <View style={styles.statusRow}>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={styles.statusText}>{statusText}</Text>
+        </View>
+      ) : null}
+
       <CustomButton 
         title={`Pay ₹${params.totalCost}`} 
         onPress={handleCheckout} 
@@ -184,4 +186,7 @@ const styles = StyleSheet.create({
   paymentMethodTitle: { fontSize: 18, color: colors.text, fontWeight: '600', marginBottom: 16 },
   methodCard: { flexDirection: 'row', alignItems: 'center', padding: 16, borderColor: colors.primary, borderWidth: 1 },
   methodText: { flex: 1, marginLeft: 16, color: colors.text, fontSize: 16 },
+
+  statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 20, gap: 10 },
+  statusText: { color: colors.textMuted, fontSize: 14 },
 });

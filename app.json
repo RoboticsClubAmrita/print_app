@@ -18,7 +18,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.CampusPrintMobile"
+      "package": "com.anonymous.CampusPrintMobile",
+      "usesCleartextTraffic": true
     },
     "web": {
       "output": "static",
@@ -33,6 +34,15 @@
           "android": {
             "image": "./assets/images/splash-icon.png",
             "imageWidth": 76
+          }
+        }
+      ],
+      "expo-web-browser",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
           }
         }
       ]
