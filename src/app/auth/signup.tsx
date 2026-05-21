@@ -29,18 +29,28 @@ export default function SignupScreen() {
     }
 
     setLoading(true);
-    // Send OTP first or just register directly if OTP is not implemented on backend
-    // Since backend does not have OTP currently, we will assume we verify via an external/mock service 
-    // or just register. 
-    // We will navigate to OTP screen for demo.
-    setTimeout(() => {
-      setLoading(false);
-      Alert.alert('Developer Mode', 'OTP sent simulated. Please use 1234 on the next screen.');
-      router.push({
-        pathname: '/auth/otp',
-        params: { name, email: lowerEmail, password, collegeId }
+    try {
+      const res = await api.post('/users/add', {
+        name,
+        email: lowerEmail,
+        password,
+        collegeId,
+        phone: '1234567890', // placeholder
+        role: 'MEMBER'
       });
-    }, 1000);
+      if (res.status === 200 || res.status === 201) {
+        Alert.alert('Success', 'Verification code sent to your email.');
+        router.push({
+          pathname: '/auth/otp',
+          params: { email: lowerEmail }
+        });
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.MESSAGE || err.response?.data?.message || err.message || 'Registration failed';
+      Alert.alert('Error', msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

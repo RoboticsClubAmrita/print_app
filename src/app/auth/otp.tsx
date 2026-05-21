@@ -9,46 +9,51 @@ import { api } from '../../api/client';
 
 export default function OtpScreen() {
   const params = useLocalSearchParams<{
-    name: string;
     email: string;
-    password: string;
-    collegeId: string;
   }>();
   const router = useRouter();
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
 
   const handleVerify = async () => {
-    if (otp !== '1234') {
-      Alert.alert('Mock OTP', 'Since email/SMS integration is pending, please use 1234 for demo verification');
+    if (!otp || otp.length < 6) {
+      Alert.alert('Error', 'Please enter the 6-digit verification code.');
       return;
     }
 
     setLoading(true);
     try {
-      const res = await api.post('/users/add', {
-        name: params.name,
+      const res = await api.post('/auth/verify-email', {
         email: params.email,
-        password: params.password,
-        collegeId: params.collegeId,
-        phone: '1234567890', // placeholder
-        role: 'student'
+        otp: otp
       });
       if (res.status === 200 || res.status === 201) {
-        Alert.alert('Success', 'Account created! Please sign in.');
+        Alert.alert('Success', 'Email verified successfully! You can now log in.');
         router.replace('/auth/login');
       }
     } catch (err: any) {
-      const msg = err.response?.data?.MESSAGE || err.response?.data?.message || err.message || 'Registration failed';
-       // the backend returns a 400 for duplicate email: "User already exists"
-      if (msg === 'User already exists') {
-         Alert.alert('Error', 'User already exists. Redirecting to login.');
-         router.replace('/auth/login');
-      } else {
-         Alert.alert('Error', msg);
-      }
+      const msg = err.response?.data?.MESSAGE || err.response?.data?.message || err.message || 'Verification failed';
+      Alert.alert('Error', msg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setResending(true);
+    try {
+      const res = await api.post('/auth/resend-verification', {
+        email: params.email
+      });
+      if (res.status === 200 || res.status === 201) {
+        Alert.alert('Success', 'A new verification code has been sent to your email.');
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.MESSAGE || err.response?.data?.message || err.message || 'Failed to resend code';
+      Alert.alert('Error', msg);
+    } finally {
+      setResending(false);
     }
   };
 
@@ -56,20 +61,26 @@ export default function OtpScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Verification</Text>
-        <Text style={styles.subtitle}>Enter the 4-digit OTP sent to {params.email}</Text>
+        <Text style={styles.subtitle}>Enter the 6-digit OTP sent to {params.email}</Text>
       </View>
 
       <GlassCard style={styles.card}>
         <InputField
           label="Verification Code"
-          placeholder="1 2 3 4"
+          placeholder="1 2 3 4 5 6"
           keyboardType="number-pad"
-          maxLength={4}
+          maxLength={6}
           style={{ textAlign: 'center', fontSize: 24, letterSpacing: 8 }}
           value={otp}
           onChangeText={setOtp}
         />
         <CustomButton title="Verify Account" onPress={handleVerify} loading={loading} />
+        <CustomButton 
+          title="Resend Verification Code" 
+          variant="ghost" 
+          onPress={handleResend} 
+          loading={resending} 
+        />
       </GlassCard>
     </ScrollView>
   );
