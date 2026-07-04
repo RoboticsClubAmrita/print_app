@@ -1,0 +1,71 @@
+import '../models/print_order.dart';
+
+/// Seeded sample orders so the app has history on first launch.
+List<PrintOrder> seedOrders() {
+  final now = DateTime.now();
+  return [
+    PrintOrder(
+      id: 'PS-1044',
+      fileName: 'Resume_Final.pdf',
+      fileSizeKb: 182,
+      pages: 2,
+      copies: 3,
+      side: PrintSide.single,
+      createdAt: now.subtract(const Duration(minutes: 25)),
+      scheduledAt: now.subtract(const Duration(minutes: 25)),
+      scheduledNow: true,
+      status: OrderStatus.queued,
+    ),
+    PrintOrder(
+      id: 'PS-1043',
+      fileName: 'Lab_Report_Unit4.docx',
+      fileSizeKb: 964,
+      pages: 18,
+      copies: 1,
+      side: PrintSide.double,
+      createdAt: now.subtract(const Duration(hours: 2)),
+      scheduledAt: now.subtract(const Duration(hours: 1)),
+      scheduledNow: false,
+      status: OrderStatus.printing,
+    ),
+    PrintOrder(
+      id: 'PS-1042',
+      fileName: 'Seminar_Slides.pptx',
+      fileSizeKb: 2412,
+      pages: 32,
+      copies: 2,
+      side: PrintSide.double,
+      createdAt: now.subtract(const Duration(hours: 5)),
+      scheduledAt: now.subtract(const Duration(hours: 4)),
+      scheduledNow: false,
+      status: OrderStatus.ready,
+      paid: true,
+    ),
+    PrintOrder(
+      id: 'PS-1041',
+      fileName: 'Assignment_3.pdf',
+      fileSizeKb: 356,
+      pages: 12,
+      copies: 1,
+      side: PrintSide.single,
+      createdAt: now.subtract(const Duration(days: 2)),
+      scheduledAt: now.subtract(const Duration(days: 2)),
+      scheduledNow: true,
+      status: OrderStatus.collected,
+      paid: true,
+    ),
+    PrintOrder(
+      id: 'PS-1040',
+      fileName: 'Train_Tickets.pdf',
+      fileSizeKb: 98,
+      pages: 4,
+      copies: 2,
+      side: PrintSide.single,
+      createdAt: now.subtract(const Duration(days: 4)),
+      scheduledAt: now.subtract(const Duration(days: 4)),
+      scheduledNow: true,
+      status: OrderStatus.collected,
+      paid: true,
+    ),
+  ];
+}
