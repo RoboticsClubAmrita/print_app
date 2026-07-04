@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../data/pricing.dart';
 import '../models/print_order.dart';
+import '../services/api_client.dart';
+import '../services/razorpay_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dot_grid.dart';
@@ -11,8 +13,58 @@ import '../widgets/fx.dart';
 
 /// Billing tab: dark statement card with an oversized total-due numeral,
 /// order-wise cost breakdown and payment history.
-class BillingTab extends StatelessWidget {
+class BillingTab extends StatefulWidget {
   const BillingTab({super.key});
+
+  @override
+  State<BillingTab> createState() => _BillingTabState();
+}
+
+class _BillingTabState extends State<BillingTab> {
+  bool _paying = false;
+
+  Future<void> _payAllDue(AppState state) async {
+    if (_paying) return;
+    setState(() => _paying = true);
+    try {
+      final unpaid = List<PrintOrder>.from(state.unpaidOrders);
+      var cleared = 0;
+      for (final order in unpaid) {
+        final created = await ApiClient.createPaymentOrder(order.jobId);
+        final result = await RazorpayService.checkout(
+          keyId: created['keyId'].toString(),
+          orderId: created['orderId'].toString(),
+          amountInPaise: (created['amountInPaise'] as num).toInt(),
+          name: state.user?.name ?? 'PrintEase User',
+          description: 'Print job ${order.id}',
+          userEmail: state.user?.email,
+          userPhone: state.user?.phone,
+        );
+        await ApiClient.verifyPayment(
+          razorpayOrderId: result.orderId,
+          razorpayPaymentId: result.paymentId,
+          razorpaySignature: result.signature,
+        );
+        cleared += order.cost;
+      }
+      await state.refreshOrders();
+      if (!mounted) return;
+      await showSuccessOverlay(
+        context,
+        title: 'Payment Successful',
+        subtitle: '${rupees(cleared)} cleared — you are all set.',
+        icon: Icons.account_balance_wallet_rounded,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : 'Payment failed')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _paying = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -173,19 +225,16 @@ class BillingTab extends StatelessWidget {
                           Colors.white.withValues(alpha: 0.16),
                       disabledForegroundColor: Colors.white38,
                     ),
-                    onPressed: state.totalDue == 0
+                    onPressed: state.totalDue == 0 || _paying
                         ? null
-                        : () {
-                            final cleared = rupees(state.totalDue);
-                            context.read<AppState>().payAllDue();
-                            showSuccessOverlay(
-                              context,
-                              title: 'Payment Successful',
-                              subtitle: '$cleared cleared — you are all set.',
-                              icon: Icons.account_balance_wallet_rounded,
-                            );
-                          },
-                    child: const Text('Pay Now'),
+                        : () => _payAllDue(state),
+                    child: _paying
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Pay Now'),
                   ),
                 ],
               ),

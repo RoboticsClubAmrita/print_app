@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -32,9 +34,21 @@ class _ShellScreenState extends State<ShellScreen>
     parent: _tabAnim,
     curve: Curves.easeOutQuart,
   );
+  Timer? _pollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Poll for order status changes so print-ready/collected notifications
+    // fire while the app is open, without the user manually refreshing.
+    _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      context.read<AppState>().refreshOrders();
+    });
+  }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _tabCurve.dispose();
     _tabAnim.dispose();
     super.dispose();
@@ -62,7 +76,10 @@ class _ShellScreenState extends State<ShellScreen>
             child: IndexedStack(
               index: _index,
               children: [
-                HomeTab(onViewOrders: () => _selectTab(1)),
+                HomeTab(
+                  onViewOrders: () => _selectTab(1),
+                  onViewProfile: () => _selectTab(3),
+                ),
                 const OrdersTab(),
                 const BillingTab(),
                 const _ProfileTab(),
@@ -372,6 +389,7 @@ class _ProfileTab extends StatelessWidget {
   }
 
   void _showRatesSheet(BuildContext context) {
+    final state = context.read<AppState>();
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.white,
@@ -390,11 +408,44 @@ class _ProfileTab extends StatelessWidget {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 16),
-              _rateRow(Icons.description_outlined, 'Single-sided',
-                  '₹$singleSidedPerPage / page'),
-              const SizedBox(height: 10),
-              _rateRow(Icons.flip_to_back_rounded, 'Double-sided',
-                  '₹$doubleSidedPerSheet / sheet'),
+              FutureBuilder<void>(
+                future: state.loadPricing(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+                  return AnimatedBuilder(
+                    animation: state,
+                    builder: (context, _) {
+                      if (state.pricing.isEmpty) {
+                        return const Text(
+                          'No print rates configured yet.',
+                          style: TextStyle(color: AppColors.textSecondary),
+                        );
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var i = 0; i < state.pricing.length; i++) ...[
+                            if (i > 0) const SizedBox(height: 10),
+                            _rateRow(
+                              (state.pricing[i]['side'] == 'double')
+                                  ? Icons.flip_to_back_rounded
+                                  : Icons.description_outlined,
+                              _rateLabel(state.pricing[i]),
+                              '₹${state.pricing[i]['price']} / '
+                              '${state.pricing[i]['side'] == 'double' ? 'sheet' : 'page'}',
+                            ),
+                          ],
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
               const SizedBox(height: 16),
               const Text(
                 'Double-sided fits two pages per sheet — cheaper for long '
@@ -410,6 +461,13 @@ class _ProfileTab extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _rateLabel(Map<String, dynamic> price) {
+    final size = (price['size'] ?? '').toString();
+    final type = price['type'] == 'colour' ? 'Colour' : 'B&W';
+    final side = price['side'] == 'double' ? 'Double-sided' : 'Single-sided';
+    return '$size • $type • $side';
   }
 
   Widget _rateRow(IconData icon, String label, String rate) {

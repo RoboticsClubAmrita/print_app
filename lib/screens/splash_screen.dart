@@ -1,16 +1,38 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/brand_mark.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
 import 'login_screen.dart';
+import 'shell_screen.dart';
 
 /// Dark hero landing screen — branded entry point with the same
 /// dot-grid texture and watermark used across the app.
-class SplashScreen extends StatelessWidget {
+class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+  bool _checking = false;
+
+  Future<void> _explore() async {
+    setState(() => _checking = true);
+    final restored = await context.read<AppState>().restoreSession();
+    if (!mounted) return;
+    setState(() => _checking = false);
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => restored ? const ShellScreen() : const LoginScreen(),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -104,20 +126,21 @@ class SplashScreen extends StatelessWidget {
                         backgroundColor: AppColors.white,
                         foregroundColor: AppColors.black,
                       ),
-                      onPressed: () {
-                        Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(
-                              builder: (_) => const LoginScreen()),
-                        );
-                      },
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text('Explore Printing'),
-                          SizedBox(width: 8),
-                          Icon(Icons.arrow_forward_rounded, size: 20),
-                        ],
-                      ),
+                      onPressed: _checking ? null : _explore,
+                      child: _checking
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text('Explore Printing'),
+                                SizedBox(width: 8),
+                                Icon(Icons.arrow_forward_rounded, size: 20),
+                              ],
+                            ),
                     ),
                   ),
                   const SizedBox(height: 24),

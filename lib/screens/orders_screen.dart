@@ -59,22 +59,30 @@ class _OrdersTabState extends State<OrdersTab> {
             ),
             const SizedBox(height: 18),
             Expanded(
-              child: orders.isEmpty
-                  ? FadeSlideIn(
-                      key: ValueKey('empty-$_filter'),
-                      from: const Offset(0, 0.04),
-                      child: _emptyState(),
-                    )
-                  : ListView.separated(
-                      key: ValueKey('list-$_filter'),
-                      padding: const EdgeInsets.only(bottom: 120),
-                      itemCount: orders.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 14),
-                      itemBuilder: (context, i) => FadeSlideIn(
-                        delay: Duration(milliseconds: 50 * (i < 6 ? i : 6)),
-                        child: _orderTicket(context, orders[i]),
+              child: RefreshIndicator(
+                onRefresh: () => context.read<AppState>().refreshOrders(),
+                child: orders.isEmpty
+                    ? ListView(
+                        key: ValueKey('empty-$_filter'),
+                        children: [
+                          const SizedBox(height: 60),
+                          FadeSlideIn(
+                            from: const Offset(0, 0.04),
+                            child: _emptyState(),
+                          ),
+                        ],
+                      )
+                    : ListView.separated(
+                        key: ValueKey('list-$_filter'),
+                        padding: const EdgeInsets.only(bottom: 120),
+                        itemCount: orders.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 14),
+                        itemBuilder: (context, i) => FadeSlideIn(
+                          delay: Duration(milliseconds: 50 * (i < 6 ? i : 6)),
+                          child: _orderTicket(context, orders[i]),
+                        ),
                       ),
-                    ),
+              ),
             ),
           ],
         ),

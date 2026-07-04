@@ -19,6 +19,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _obscure = true;
+  bool _submitting = false;
 
   @override
   void dispose() {
@@ -28,16 +29,36 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  void _submit() {
-    final ok = context
-        .read<AppState>()
-        .register(_name.text, _email.text, _password.text);
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Fill in all fields to register')),
-      );
+  Future<void> _submit() async {
+    if (_submitting) return;
+    setState(() => _submitting = true);
+    final state = context.read<AppState>();
+    final error = await state.register(_name.text, _email.text, _password.text);
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
       return;
     }
+
+    final email = _email.text.trim();
+    final otp = await _promptForOtp(email);
+    if (otp == null || !mounted) return;
+
+    final verifyError = await state.verifyEmail(email, otp);
+    if (!mounted) return;
+    if (verifyError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(verifyError)));
+      return;
+    }
+
+    final loginError = await state.login(email, _password.text);
+    if (!mounted) return;
+    if (loginError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(loginError)));
+      return;
+    }
+
     showSuccessOverlay(
       context,
       title: 'Welcome to PrintEase',
@@ -50,6 +71,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
         (route) => false,
       );
     });
+  }
+
+  Future<String?> _promptForOtp(String email) async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Verify your email'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter the 6-digit code sent to $email.'),
+            const SizedBox(height: 14),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              decoration: const InputDecoration(hintText: '123456'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Verify'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -172,8 +228,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 24),
                       FilledButton(
-                        onPressed: _submit,
-                        child: const Text('Create Account'),
+                        onPressed: _submitting ? null : _submit,
+                        child: _submitting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.white,
+                                ),
+                              )
+                            : const Text('Create Account'),
                       ),
                     ],
                   ),

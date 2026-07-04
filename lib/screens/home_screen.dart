@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -5,8 +7,10 @@ import 'package:provider/provider.dart';
 
 import '../data/pricing.dart';
 import '../models/print_order.dart';
+import '../services/api_client.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../utils/page_range.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/field_chip.dart';
 import '../widgets/fx.dart';
@@ -17,40 +21,280 @@ import 'order_detail_screen.dart';
 /// mirroring the flight booking reference layout.
 class HomeTab extends StatefulWidget {
   final VoidCallback onViewOrders;
+  final VoidCallback onViewProfile;
 
-  const HomeTab({super.key, required this.onViewOrders});
+  const HomeTab({super.key, required this.onViewOrders, required this.onViewProfile});
 
   @override
   State<HomeTab> createState() => _HomeTabState();
 }
 
+/// Extensions the backend's upload filter accepts (see
+/// print_backend/utils/uploadHelper.js) — PDFs, Word docs, and images.
+const _kPrintableExtensions = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'];
+
 class _HomeTabState extends State<HomeTab> {
   String? _fileName;
+  Uint8List? _fileBytes;
   int _fileSizeKb = 0;
-  int _pages = 1;
+  String? _fileId;
+  int? _detectedPages;
+  List<int>? _selectedPages; // null = every page
   int _copies = 1;
   int _sideIndex = 0;
   DateTime? _scheduledAt;
   bool _picking = false;
+  bool _uploading = false;
+  bool _placing = false;
 
   PrintSide get _side => _sideIndex == 0 ? PrintSide.single : PrintSide.double;
 
-  int get _estimate => printCost(pages: _pages, copies: _copies, side: _side);
+  int get _selectedPageCount => _selectedPages?.length ?? (_detectedPages ?? 0);
+
+  int get _estimate =>
+      printCost(pages: _selectedPageCount, copies: _copies, side: _side);
+
+  Future<void> _pickPageRange() async {
+    if (_detectedPages == null) return;
+    final controller = TextEditingController(
+      text: _selectedPages == null ? '' : formatPageRange(_selectedPages!),
+    );
+    String? error;
+    final result = await showDialog<List<int>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Choose pages'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('This document has $_detectedPages pages.'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'e.g. 1-5, 8, 11-13',
+                  helperText: 'Leave blank for all pages',
+                  errorText: error,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                try {
+                  final pages = parsePageRange(controller.text, _detectedPages!);
+                  Navigator.of(dialogContext).pop(pages);
+                } on FormatException catch (e) {
+                  setDialogState(() => error = e.message);
+                }
+              },
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _selectedPages = result.length == _detectedPages ? null : result;
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final state = context.read<AppState>();
+    if (state.locations.isEmpty) state.loadLocations();
+  }
+
+  Future<void> _pickLocation() async {
+    final state = context.read<AppState>();
+    if (state.locations.isEmpty) await state.loadLocations();
+    if (!mounted) return;
+    if (state.locations.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No print locations available yet')),
+      );
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Choose a print location',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 14),
+              for (final loc in state.locations)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.location_on_rounded),
+                  title: Text((loc['name'] ?? 'Location').toString()),
+                  onTap: () {
+                    state.selectLocation(
+                      (loc['_id'] ?? '').toString(),
+                      (loc['name'] ?? 'Location').toString(),
+                    );
+                    Navigator.of(sheetContext).pop();
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showNotifications() {
+    final notifications = context.read<AppState>().notifications;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Notifications',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 16),
+              if (notifications.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    'No notifications yet.',
+                    style: TextStyle(color: AppColors.textSecondary),
+                  ),
+                )
+              else
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.5,
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: notifications.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, i) {
+                      final n = notifications[i];
+                      return Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: AppColors.chip,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              n.title,
+                              style: const TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(n.body,
+                                style: const TextStyle(
+                                    fontSize: 12.5, color: AppColors.textSecondary)),
+                            const SizedBox(height: 4),
+                            Text(
+                              DateFormat('MMM d, h:mm a').format(n.time),
+                              style: const TextStyle(
+                                  fontSize: 11, color: AppColors.textSecondary),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Future<void> _pickFile() async {
     if (_picking) return;
     setState(() => _picking = true);
     try {
-      final result = await FilePicker.platform.pickFiles(withData: false);
+      final result = await FilePicker.platform.pickFiles(
+        withData: true,
+        type: FileType.custom,
+        allowedExtensions: _kPrintableExtensions,
+      );
       if (result != null && result.files.isNotEmpty && mounted) {
         final f = result.files.first;
-        setState(() {
-          _fileName = f.name;
-          _fileSizeKb = (f.size / 1024).ceil();
-        });
+        if (f.bytes == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not read that file')),
+          );
+        } else {
+          setState(() {
+            _fileName = f.name;
+            _fileBytes = f.bytes;
+            _fileSizeKb = (f.size / 1024).ceil();
+            _fileId = null;
+            _detectedPages = null;
+            _selectedPages = null;
+          });
+          await _uploadPicked();
+        }
       }
     } finally {
       if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  Future<void> _uploadPicked() async {
+    if (_fileBytes == null || _fileName == null) return;
+    setState(() => _uploading = true);
+    try {
+      final uploaded = await context.read<AppState>().uploadDocument(
+            fileBytes: _fileBytes!,
+            fileName: _fileName!,
+          );
+      if (!mounted) return;
+      setState(() {
+        _fileId = uploaded.fileId;
+        _detectedPages = uploaded.pages;
+      });
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read the document. Try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploading = false);
     }
   }
 
@@ -113,42 +357,65 @@ class _HomeTabState extends State<HomeTab> {
     });
   }
 
-  void _placeOrder() {
-    if (_fileName == null) {
+  Future<void> _placeOrder() async {
+    if (_fileName == null || _fileBytes == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Choose a document to print first')),
       );
       return;
     }
-    final order = context.read<AppState>().placeOrder(
-          fileName: _fileName!,
-          fileSizeKb: _fileSizeKb,
-          pages: _pages,
-          copies: _copies,
-          side: _side,
-          scheduledAt: _scheduledAt,
-        );
-    setState(() {
-      _fileName = null;
-      _fileSizeKb = 0;
-      _pages = 1;
-      _copies = 1;
-      _sideIndex = 0;
-      _scheduledAt = null;
-    });
-    showSuccessOverlay(
-      context,
-      title: 'Order Placed',
-      subtitle: '${order.id} • ${order.fileName}',
-      icon: Icons.print_rounded,
-    ).then((_) {
+    if (_uploading || _fileId == null || _detectedPages == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Still counting pages — try again in a moment')),
+      );
+      return;
+    }
+    if (_placing) return;
+    setState(() => _placing = true);
+    try {
+      final order = await context.read<AppState>().placeOrder(
+            fileId: _fileId!,
+            pages: _selectedPageCount,
+            copies: _copies,
+            side: _side,
+          );
+      if (!mounted) return;
+      setState(() {
+        _fileName = null;
+        _fileBytes = null;
+        _fileSizeKb = 0;
+        _fileId = null;
+        _detectedPages = null;
+        _selectedPages = null;
+        _copies = 1;
+        _sideIndex = 0;
+        _scheduledAt = null;
+      });
+      await showSuccessOverlay(
+        context,
+        title: 'Order Placed',
+        subtitle: '${order.id} • ${order.fileName}',
+        icon: Icons.print_rounded,
+      );
       if (!mounted) return;
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => OrderDetailScreen(orderId: order.id),
         ),
       );
-    });
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not place the order. Check your connection.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _placing = false);
+    }
   }
 
   @override
@@ -218,64 +485,74 @@ class _HomeTabState extends State<HomeTab> {
                 children: [
                   Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 9),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: Colors.white12, width: 1),
-                        ),
-                        child: const Row(
-                          children: [
-                            Icon(Icons.location_on_rounded,
-                                color: AppColors.white, size: 15),
-                            SizedBox(width: 6),
-                            Text(
-                              'Campus Print Hub',
-                              style: TextStyle(
-                                color: AppColors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
+                      Pressable(
+                        onTap: _pickLocation,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 9),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: Colors.white12, width: 1),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.location_on_rounded,
+                                  color: AppColors.white, size: 15),
+                              const SizedBox(width: 6),
+                              Text(
+                                context.watch<AppState>().selectedLocationName ??
+                                    'Choose Location',
+                                style: const TextStyle(
+                                  color: AppColors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                            ),
-                            SizedBox(width: 4),
-                            Icon(Icons.keyboard_arrow_down_rounded,
-                                color: Colors.white54, size: 16),
-                          ],
+                              const SizedBox(width: 4),
+                              const Icon(Icons.keyboard_arrow_down_rounded,
+                                  color: Colors.white54, size: 16),
+                            ],
+                          ),
                         ),
                       ),
                       const Spacer(),
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.08),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white24, width: 1.5),
-                        ),
-                        child: const Icon(
-                          Icons.notifications_none_rounded,
-                          color: AppColors.white,
-                          size: 22,
+                      Pressable(
+                        onTap: _showNotifications,
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white24, width: 1.5),
+                          ),
+                          child: const Icon(
+                            Icons.notifications_none_rounded,
+                            color: AppColors.white,
+                            size: 22,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 10),
-                      Container(
-                        padding: const EdgeInsets.all(2),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white24, width: 1.5),
-                        ),
-                        child: CircleAvatar(
-                          radius: 20,
-                          backgroundColor: AppColors.white,
-                          child: Text(
-                            context.watch<AppState>().user?.initials ?? '?',
-                            style: const TextStyle(
-                              color: AppColors.black,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 15,
+                      Pressable(
+                        onTap: widget.onViewProfile,
+                        child: Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white24, width: 1.5),
+                          ),
+                          child: CircleAvatar(
+                            radius: 20,
+                            backgroundColor: AppColors.white,
+                            child: Text(
+                              context.watch<AppState>().user?.initials ?? '?',
+                              style: const TextStyle(
+                                color: AppColors.black,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 15,
+                              ),
                             ),
                           ),
                         ),
@@ -387,10 +664,18 @@ class _HomeTabState extends State<HomeTab> {
           Row(
             children: [
               Expanded(
-                child: StepperChip(
+                child: FieldChip(
                   label: 'Pages',
-                  value: _pages,
-                  onChanged: (v) => setState(() => _pages = v),
+                  value: _uploading
+                      ? 'Counting…'
+                      : _detectedPages == null
+                          ? '—'
+                          : _selectedPages == null
+                              ? 'All ($_detectedPages)'
+                              : '${_selectedPages!.length} of $_detectedPages',
+                  valueIsPlaceholder: _detectedPages == null,
+                  trailingIcon: Icons.edit_note_rounded,
+                  onTap: _detectedPages == null ? null : _pickPageRange,
                 ),
               ),
               const SizedBox(width: 12),
@@ -403,6 +688,21 @@ class _HomeTabState extends State<HomeTab> {
               ),
             ],
           ),
+          if (_detectedPages != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              _selectedPages == null
+                  ? 'Printing all $_detectedPages pages × $_copies ${_copies > 1 ? 'copies' : 'copy'}'
+                  : 'Printing pages ${formatPageRange(_selectedPages!)} '
+                      '(${_selectedPages!.length} pages) × $_copies '
+                      '${_copies > 1 ? 'copies' : 'copy'}',
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           FieldChip(
             label: 'Print Time',
@@ -467,15 +767,21 @@ class _HomeTabState extends State<HomeTab> {
           ),
           const SizedBox(height: 14),
           FilledButton(
-            onPressed: _placeOrder,
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text('Place Print Order'),
-                SizedBox(width: 8),
-                Icon(Icons.arrow_forward_rounded, size: 20),
-              ],
-            ),
+            onPressed: (_placing || _uploading) ? null : _placeOrder,
+            child: _placing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                  )
+                : const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('Place Print Order'),
+                      SizedBox(width: 8),
+                      Icon(Icons.arrow_forward_rounded, size: 20),
+                    ],
+                  ),
           ),
         ],
       ),
@@ -687,10 +993,13 @@ class _StatusDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = switch (status) {
+      OrderStatus.pending => AppColors.warning,
       OrderStatus.queued => AppColors.textSecondary,
       OrderStatus.printing => AppColors.warning,
       OrderStatus.ready => AppColors.success,
       OrderStatus.collected => AppColors.success,
+      OrderStatus.cancelled => AppColors.textSecondary,
+      OrderStatus.failed => AppColors.warning,
     };
     return Container(
       width: 7,

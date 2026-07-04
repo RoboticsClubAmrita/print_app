@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../services/session_store.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/brand_mark.dart';
@@ -22,6 +23,25 @@ class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _obscure = true;
+  bool _submitting = false;
+  bool _rememberMe = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCredentials();
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    final email = await SessionStore.savedEmail;
+    final password = await SessionStore.savedPassword;
+    if (!mounted || email == null || password == null) return;
+    setState(() {
+      _email.text = email;
+      _password.text = password;
+      _rememberMe = true;
+    });
+  }
 
   @override
   void dispose() {
@@ -37,21 +57,29 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  void _submit() {
-    final ok = context.read<AppState>().login(_email.text, _password.text);
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter your email and password')),
-      );
+  Future<void> _submit() async {
+    if (_submitting) return;
+    setState(() => _submitting = true);
+    final error = await context.read<AppState>().login(_email.text, _password.text);
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
       return;
     }
+    if (_rememberMe) {
+      await SessionStore.saveCredentials(email: _email.text.trim(), password: _password.text);
+    } else {
+      await SessionStore.clearCredentials();
+    }
+    if (!mounted) return;
     _goToApp();
   }
 
-  void _socialLogin(String provider) {
-    // Demo app — social sign-in is mocked and logs you straight in.
-    context.read<AppState>().login('$provider.user@print.com', 'demo');
-    _goToApp();
+  void _socialLoginUnavailable(String provider) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$provider sign-in is not available yet — use email and password.')),
+    );
   }
 
   @override
@@ -242,29 +270,59 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                       ),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const ForgotPasswordScreen(),
-                              ),
-                            );
-                          },
-                          child: const Text(
-                            'Forgot Password?',
-                            style: TextStyle(
-                              color: AppColors.black,
-                              fontWeight: FontWeight.w700,
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: Checkbox(
+                              value: _rememberMe,
+                              activeColor: AppColors.black,
+                              onChanged: (v) =>
+                                  setState(() => _rememberMe = v ?? false),
                             ),
                           ),
-                        ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Remember me',
+                            style: TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => const ForgotPasswordScreen(),
+                                ),
+                              );
+                            },
+                            child: const Text(
+                              'Forgot Password?',
+                              style: TextStyle(
+                                color: AppColors.black,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 6),
                       FilledButton(
-                        onPressed: _submit,
-                        child: const Text('Sign In'),
+                        onPressed: _submitting ? null : _submit,
+                        child: _submitting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.white,
+                                ),
+                              )
+                            : const Text('Sign In'),
                       ),
                       const SizedBox(height: 22),
                       const _OrDivider(),
@@ -275,7 +333,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             child: SocialButton(
                               label: 'Google',
                               icon: _googleG(),
-                              onTap: () => _socialLogin('google'),
+                              onTap: () => _socialLoginUnavailable('Google'),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -284,7 +342,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               label: 'Apple',
                               icon: const Icon(Icons.apple,
                                   size: 22, color: AppColors.black),
-                              onTap: () => _socialLogin('apple'),
+                              onTap: () => _socialLoginUnavailable('Apple'),
                             ),
                           ),
                         ],

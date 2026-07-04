@@ -4,21 +4,140 @@ import 'package:provider/provider.dart';
 
 import '../data/pricing.dart';
 import '../models/print_order.dart';
+import '../services/api_client.dart';
+import '../services/razorpay_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fx.dart';
 import '../widgets/status_chip.dart';
 import '../widgets/ticket_card.dart';
 
-class OrderDetailScreen extends StatelessWidget {
+class OrderDetailScreen extends StatefulWidget {
   final String orderId;
 
   const OrderDetailScreen({super.key, required this.orderId});
 
   @override
+  State<OrderDetailScreen> createState() => _OrderDetailScreenState();
+}
+
+class _OrderDetailScreenState extends State<OrderDetailScreen> {
+  bool _busy = false;
+
+  Future<void> _payNow(PrintOrder order) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final state = context.read<AppState>();
+    try {
+      final created = await ApiClient.createPaymentOrder(order.jobId);
+      final result = await RazorpayService.checkout(
+        keyId: created['keyId'].toString(),
+        orderId: created['orderId'].toString(),
+        amountInPaise: (created['amountInPaise'] as num).toInt(),
+        name: state.user?.name ?? 'PrintEase User',
+        description: 'Print job ${order.id}',
+        userEmail: state.user?.email,
+        userPhone: state.user?.phone,
+      );
+      await ApiClient.verifyPayment(
+        razorpayOrderId: result.orderId,
+        razorpayPaymentId: result.paymentId,
+        razorpaySignature: result.signature,
+      );
+      await state.refreshOrders();
+      if (!mounted) return;
+      await showSuccessOverlay(
+        context,
+        title: 'Payment Successful',
+        subtitle: '${rupees(order.cost)} paid for ${order.fileName}.',
+        icon: Icons.account_balance_wallet_rounded,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : 'Payment failed')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _cancel(PrintOrder order) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await context.read<AppState>().cancelOrder(order);
+    } on ApiException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _requestAndConfirmCollection(PrintOrder order) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final state = context.read<AppState>();
+    try {
+      final email = await state.requestCollection(order);
+      if (!mounted) return;
+      final otp = await _promptForOtp(email);
+      if (otp == null || !mounted) return;
+      await state.confirmCollection(order, otp);
+      if (!mounted) return;
+      await showSuccessOverlay(
+        context,
+        title: 'Collection Confirmed',
+        subtitle: 'Enjoy your prints!',
+        icon: Icons.inventory_2_rounded,
+      );
+    } on ApiException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<String?> _promptForOtp(String email) async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Confirm collection'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter the OTP sent to ${email.isEmpty ? 'your email' : email}.'),
+            const SizedBox(height: 14),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              decoration: const InputDecoration(hintText: '1234'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final order = state.orders.firstWhere((o) => o.id == orderId);
+    final order = state.orders.firstWhere((o) => o.id == widget.orderId);
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -169,8 +288,37 @@ class OrderDetailScreen extends StatelessWidget {
     );
   }
 
+  static const _timelineSteps = [
+    OrderStatus.pending,
+    OrderStatus.queued,
+    OrderStatus.printing,
+    OrderStatus.ready,
+    OrderStatus.collected,
+  ];
+
   Widget _timelineCard(PrintOrder order) {
-    const steps = OrderStatus.values;
+    if (order.status == OrderStatus.cancelled || order.status == OrderStatus.failed) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(26),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.cancel_outlined, color: AppColors.textSecondary),
+            const SizedBox(width: 12),
+            Text(
+              order.status == OrderStatus.cancelled
+                  ? 'This order was cancelled.'
+                  : 'This order failed to print.',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+      );
+    }
+    final steps = _timelineSteps;
     final currentIndex = steps.indexOf(order.status);
     return Container(
       padding: const EdgeInsets.all(20),
@@ -381,37 +529,32 @@ class OrderDetailScreen extends StatelessWidget {
 
   Widget _actions(BuildContext context, PrintOrder order) {
     switch (order.status) {
+      case OrderStatus.pending:
+        return FilledButton.icon(
+          icon: const Icon(Icons.payment_rounded, size: 20),
+          label: Text(_busy ? 'Processing…' : 'Pay ${rupees(order.cost)}'),
+          onPressed: _busy ? null : () => _payNow(order),
+        );
       case OrderStatus.ready:
         return FilledButton.icon(
           icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
-          label: const Text('Confirm Collection'),
-          onPressed: () {
-            context.read<AppState>().confirmCollection(order);
-            showSuccessOverlay(
-              context,
-              title: 'Collection Confirmed',
-              subtitle: 'Enjoy your prints!',
-              icon: Icons.inventory_2_rounded,
-            );
-          },
+          label: Text(_busy ? 'Processing…' : 'Request Collection'),
+          onPressed: _busy ? null : () => _requestAndConfirmCollection(order),
         );
       case OrderStatus.queued:
+        return OutlinedButton.icon(
+          icon: const Icon(Icons.cancel_outlined, size: 20),
+          label: Text(_busy ? 'Cancelling…' : 'Cancel Order'),
+          onPressed: _busy ? null : () => _cancel(order),
+        );
       case OrderStatus.printing:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            OutlinedButton.icon(
-              icon: const Icon(Icons.fast_forward_rounded, size: 20),
-              label: const Text('Advance Status (demo)'),
-              onPressed: () => context.read<AppState>().advanceStatus(order),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Demo app — advance the order manually since there is no real print shop backend.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
-            ),
-          ],
+        return const Padding(
+          padding: EdgeInsets.symmetric(vertical: 6),
+          child: Text(
+            'Your document is printing now.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
+          ),
         );
       case OrderStatus.collected:
         return Container(
@@ -433,6 +576,9 @@ class OrderDetailScreen extends StatelessWidget {
             ],
           ),
         );
+      case OrderStatus.cancelled:
+      case OrderStatus.failed:
+        return const SizedBox.shrink();
     }
   }
 }

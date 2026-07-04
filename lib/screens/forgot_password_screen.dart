@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
@@ -14,6 +16,7 @@ class ForgotPasswordScreen extends StatefulWidget {
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _email = TextEditingController();
   bool _sent = false;
+  bool _sending = false;
 
   @override
   void dispose() {
@@ -21,11 +24,19 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     super.dispose();
   }
 
-  void _send() {
+  Future<void> _send() async {
     if (_email.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter your email address')),
       );
+      return;
+    }
+    setState(() => _sending = true);
+    final error = await context.read<AppState>().forgotPassword(_email.text.trim());
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
       return;
     }
     setState(() => _sent = true);
@@ -167,7 +178,16 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           ),
         ),
         const SizedBox(height: 24),
-        FilledButton(onPressed: _send, child: const Text('Send Reset Link')),
+        FilledButton(
+          onPressed: _sending ? null : _send,
+          child: _sending
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                )
+              : const Text('Send Reset Link'),
+        ),
       ],
     );
   }
@@ -206,7 +226,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         ),
         const SizedBox(height: 10),
         Text(
-          'A reset link was sent to ${_email.text.trim()}.\n(Demo app — no email is actually sent.)',
+          'A reset link was sent to ${_email.text.trim()}.',
           textAlign: TextAlign.center,
           style: const TextStyle(color: AppColors.textSecondary, height: 1.5),
         ),
