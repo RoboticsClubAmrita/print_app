@@ -1,6 +1,15 @@
 import '../data/pricing.dart';
 
-enum OrderStatus { pending, queued, printing, ready, collected, cancelled, failed }
+enum OrderStatus {
+  pending,
+  queued,
+  printing,
+  awaitingStack,
+  ready,
+  collected,
+  cancelled,
+  failed,
+}
 
 enum PrintSide { single, double }
 
@@ -9,6 +18,7 @@ extension OrderStatusLabel on OrderStatus {
         OrderStatus.pending => 'Awaiting Payment',
         OrderStatus.queued => 'Queued',
         OrderStatus.printing => 'Printing',
+        OrderStatus.awaitingStack => 'Waiting for Pickup Slot',
         OrderStatus.ready => 'Ready to Collect',
         OrderStatus.collected => 'Collected',
         OrderStatus.cancelled => 'Cancelled',
@@ -16,11 +26,17 @@ extension OrderStatusLabel on OrderStatus {
       };
 
   /// Maps the backend `Job.status` string to the app's [OrderStatus].
+  ///
+  /// `PRINTED_PENDING_STACK` means printing finished but no physical stack
+  /// slot is free yet, so it's kept distinct from `COMPLETED` (truly ready
+  /// to collect) — otherwise the app offers "Request Collection" for a job
+  /// that isn't actually sitting in a stack, which the backend then rejects.
   static OrderStatus fromBackend(String? status) => switch (status) {
         'PENDING' => OrderStatus.pending,
         'QUEUED' => OrderStatus.queued,
         'PRINTING' => OrderStatus.printing,
-        'COMPLETED' || 'PRINTED_PENDING_STACK' => OrderStatus.ready,
+        'PRINTED_PENDING_STACK' => OrderStatus.awaitingStack,
+        'COMPLETED' => OrderStatus.ready,
         'COLLECTED' => OrderStatus.collected,
         'CANCELLED' => OrderStatus.cancelled,
         'FAILED' => OrderStatus.failed,
@@ -54,6 +70,21 @@ class PrintOrder {
   final DateTime scheduledAt;
   final bool scheduledNow;
   final num backendCost;
+
+  /// Real per-page/sheet rate the backend charged (from `print_prices`),
+  /// as opposed to the flat local estimate in `data/pricing.dart`.
+  final num costPerPage;
+
+  /// `copies * totalPagesToPrint * costPerPage` — the cost of this job
+  /// alone, before any outstanding balance is rolled in.
+  final num basePrintCost;
+
+  /// Outstanding balance (e.g. uncollected-materials storage fees) that
+  /// the backend added on top of [basePrintCost] to make up [backendCost].
+  final num balanceApplied;
+
+  final String colorMode; // BW | COLOR
+  final String pageType; // A2 | A3 | A4
   OrderStatus status;
 
   PrintOrder({
@@ -69,6 +100,11 @@ class PrintOrder {
     required this.scheduledNow,
     this.status = OrderStatus.queued,
     this.backendCost = 0,
+    this.costPerPage = 0,
+    this.basePrintCost = 0,
+    this.balanceApplied = 0,
+    this.colorMode = 'BW',
+    this.pageType = 'A4',
   });
 
   factory PrintOrder.fromJob(Map<String, dynamic> job) {
@@ -87,6 +123,11 @@ class PrintOrder {
       scheduledNow: true,
       status: OrderStatusLabel.fromBackend(job['status']?.toString()),
       backendCost: (job['totalCost'] as num?) ?? 0,
+      costPerPage: (job['costPerPage'] as num?) ?? 0,
+      basePrintCost: (job['printCost'] as num?) ?? 0,
+      balanceApplied: (job['balanceApplied'] as num?) ?? 0,
+      colorMode: (job['colorMode'] ?? 'BW').toString(),
+      pageType: (job['pageType'] ?? 'A4').toString(),
     );
   }
 
@@ -102,4 +143,6 @@ class PrintOrder {
 
   /// Sheets of paper used per copy (double-sided fits 2 pages per sheet).
   int get sheetsPerCopy => side == PrintSide.single ? pages : (pages + 1) ~/ 2;
+
+  String get colorModeLabel => colorMode == 'COLOR' ? 'Colour' : 'B&W';
 }

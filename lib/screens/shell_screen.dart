@@ -389,111 +389,13 @@ class _ProfileTab extends StatelessWidget {
   }
 
   void _showRatesSheet(BuildContext context) {
-    final state = context.read<AppState>();
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Print Rates',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 16),
-              FutureBuilder<void>(
-                future: state.loadPricing(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState != ConnectionState.done) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
-                      child: Center(child: CircularProgressIndicator()),
-                    );
-                  }
-                  return AnimatedBuilder(
-                    animation: state,
-                    builder: (context, _) {
-                      if (state.pricing.isEmpty) {
-                        return const Text(
-                          'No print rates configured yet.',
-                          style: TextStyle(color: AppColors.textSecondary),
-                        );
-                      }
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (var i = 0; i < state.pricing.length; i++) ...[
-                            if (i > 0) const SizedBox(height: 10),
-                            _rateRow(
-                              (state.pricing[i]['side'] == 'double')
-                                  ? Icons.flip_to_back_rounded
-                                  : Icons.description_outlined,
-                              _rateLabel(state.pricing[i]),
-                              '₹${state.pricing[i]['price']} / '
-                              '${state.pricing[i]['side'] == 'double' ? 'sheet' : 'page'}',
-                            ),
-                          ],
-                        ],
-                      );
-                    },
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Double-sided fits two pages per sheet — cheaper for long '
-                'documents and better for the planet.',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color: AppColors.textSecondary,
-                  height: 1.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _rateLabel(Map<String, dynamic> price) {
-    final size = (price['size'] ?? '').toString();
-    final type = price['type'] == 'colour' ? 'Colour' : 'B&W';
-    final side = price['side'] == 'double' ? 'Double-sided' : 'Single-sided';
-    return '$size • $type • $side';
-  }
-
-  Widget _rateRow(IconData icon, String label, String rate) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: AppColors.chip,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: AppColors.black),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              style:
-                  const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
-            ),
-          ),
-          Text(
-            rate,
-            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
-          ),
-        ],
-      ),
+      builder: (_) => const _RatesSheetContent(),
     );
   }
 
@@ -539,6 +441,128 @@ class _ProfileTab extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Content of the "Print Rates" bottom sheet.
+///
+/// Loads pricing exactly once via a `late final` future captured in
+/// [initState]. Passing `state.loadPricing()` straight into a
+/// `FutureBuilder`'s `future:` from inside `build()` — as this used to do —
+/// creates a brand-new [Future] (and kicks off a new network call) on every
+/// rebuild, which resets the FutureBuilder to its loading spinner each time.
+/// Since [AppState] notifies listeners roughly every 20s (order polling)
+/// and drag/scroll gestures on a modal sheet can also trigger rebuilds, the
+/// whole sheet appeared to "keep refreshing" instead of showing the rates.
+class _RatesSheetContent extends StatefulWidget {
+  const _RatesSheetContent();
+
+  @override
+  State<_RatesSheetContent> createState() => _RatesSheetContentState();
+}
+
+class _RatesSheetContentState extends State<_RatesSheetContent> {
+  late final Future<void> _future = context.read<AppState>().loadPricing();
+
+  String _rateLabel(Map<String, dynamic> price) {
+    final size = (price['size'] ?? '').toString();
+    final type = price['type'] == 'colour' ? 'Colour' : 'B&W';
+    final side = price['side'] == 'double' ? 'Double-sided' : 'Single-sided';
+    return '$size • $type • $side';
+  }
+
+  Widget _rateRow(IconData icon, String label, String rate) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppColors.chip,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: AppColors.black),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              style:
+                  const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
+            ),
+          ),
+          Text(
+            rate,
+            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Print Rates',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 16),
+            FutureBuilder<void>(
+              future: _future,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                return Consumer<AppState>(
+                  builder: (context, state, _) {
+                    if (state.pricing.isEmpty) {
+                      return const Text(
+                        'No print rates configured yet.',
+                        style: TextStyle(color: AppColors.textSecondary),
+                      );
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var i = 0; i < state.pricing.length; i++) ...[
+                          if (i > 0) const SizedBox(height: 10),
+                          _rateRow(
+                            (state.pricing[i]['side'] == 'double')
+                                ? Icons.flip_to_back_rounded
+                                : Icons.description_outlined,
+                            _rateLabel(state.pricing[i]),
+                            '₹${state.pricing[i]['price']} / '
+                            '${state.pricing[i]['side'] == 'double' ? 'sheet' : 'page'}',
+                          ),
+                        ],
+                      ],
+                    );
+                  },
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Double-sided fits two pages per sheet — cheaper for long '
+              'documents and better for the planet.',
+              style: TextStyle(
+                fontSize: 12.5,
+                color: AppColors.textSecondary,
+                height: 1.5,
+              ),
+            ),
+          ],
         ),
       ),
     );

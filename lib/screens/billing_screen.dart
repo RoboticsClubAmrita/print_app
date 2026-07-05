@@ -287,12 +287,26 @@ class _BillingTabState extends State<BillingTab> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${o.sheetsPerCopy * o.copies} sheets at ${rateLabel(o.side)}',
+                  o.costPerPage > 0
+                      ? 'at ₹${o.costPerPage} / page'
+                      : rateLabel(o.side),
                   style: const TextStyle(
                     fontSize: 12.5,
                     color: AppColors.textSecondary,
                   ),
                 ),
+                if (o.balanceApplied > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      '+ ${rupees(o.balanceApplied.round())} carried-over balance',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

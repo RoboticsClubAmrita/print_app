@@ -212,6 +212,10 @@ class AppState extends ChangeNotifier {
       if (previous != null && previous != order.status) {
         final (title, body) = switch (order.status) {
           OrderStatus.printing => ('Printing now', '${order.fileName} is being printed.'),
+          OrderStatus.awaitingStack => (
+              'Printed',
+              '${order.fileName} is printed and waiting for a pickup slot.'
+            ),
           OrderStatus.ready => ('Ready to collect!', '${order.fileName} is ready — come collect it.'),
           OrderStatus.collected => ('Collected', '${order.fileName} was collected. Thanks!'),
           _ => (null, null),
@@ -277,9 +281,12 @@ class AppState extends ChangeNotifier {
   Future<String> requestCollection(PrintOrder order) =>
       ApiClient.requestCollect(order.jobId);
 
-  Future<void> confirmCollection(PrintOrder order, String otp) async {
-    await ApiClient.verifyCollect(order.jobId, otp);
+  /// Verifies the collection OTP and returns the name of the stack the
+  /// material was sitting in, so the UI can tell the user where to look.
+  Future<String> confirmCollection(PrintOrder order, String otp) async {
+    final stackName = await ApiClient.verifyCollect(order.jobId, otp);
     await refreshOrders();
+    return stackName;
   }
 
   Future<void> cancelOrder(PrintOrder order) async {

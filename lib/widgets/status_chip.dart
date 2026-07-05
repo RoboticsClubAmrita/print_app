@@ -16,6 +16,7 @@ class StatusChip extends StatelessWidget {
       OrderStatus.pending => (AppColors.warning, false),
       OrderStatus.queued => (AppColors.textSecondary, false),
       OrderStatus.printing => (AppColors.warning, true),
+      OrderStatus.awaitingStack => (AppColors.warning, false),
       OrderStatus.ready => (AppColors.success, true),
       OrderStatus.collected => (AppColors.success, false),
       OrderStatus.cancelled => (AppColors.textSecondary, false),

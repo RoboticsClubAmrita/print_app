@@ -84,12 +84,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       if (!mounted) return;
       final otp = await _promptForOtp(email);
       if (otp == null || !mounted) return;
-      await state.confirmCollection(order, otp);
+      final stackName = await state.confirmCollection(order, otp);
       if (!mounted) return;
       await showSuccessOverlay(
         context,
         title: 'Collection Confirmed',
-        subtitle: 'Enjoy your prints!',
+        subtitle: stackName.isEmpty
+            ? 'Enjoy your prints!'
+            : 'Your prints were at Stack $stackName. Enjoy!',
         icon: Icons.inventory_2_rounded,
       );
     } on ApiException catch (e) {
@@ -319,7 +321,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       );
     }
     final steps = _timelineSteps;
-    final currentIndex = steps.indexOf(order.status);
+    // awaitingStack (printed, no free stack yet) sits at the same node as
+    // ready (printed and sitting in a stack) — both mean "printing is done".
+    final displayStatus =
+        order.status == OrderStatus.awaitingStack ? OrderStatus.ready : order.status;
+    final currentIndex = steps.indexOf(displayStatus);
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -336,7 +342,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           const SizedBox(height: 16),
           for (var i = 0; i < steps.length; i++)
             _timelineStep(
-              steps[i].label,
+              // While awaiting a free stack, show that nuance on the node
+              // that would otherwise just say "Ready to Collect".
+              i == currentIndex && order.status == OrderStatus.awaitingStack
+                  ? order.status.label
+                  : steps[i].label,
               reached: i <= currentIndex,
               isCurrent: i == currentIndex,
               isLast: i == steps.length - 1,
@@ -475,13 +485,33 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             ],
           ),
           const SizedBox(height: 16),
+          _costRow('Paper', '${order.pageType} • ${order.colorModeLabel}'),
+          _costRow('Side', order.side.label),
           _costRow('Pages per copy', '${order.pages}'),
           _costRow('Copies', '${order.copies}'),
-          _costRow(
-            'Sheets used',
-            '${order.sheetsPerCopy} × ${order.copies} = ${order.sheetsPerCopy * order.copies}',
-          ),
-          _costRow('Rate', rateLabel(order.side)),
+          if (order.costPerPage > 0) ...[
+            _costRow('Rate charged', '₹${order.costPerPage} / page'),
+            _costRow('Print cost', rupees(order.basePrintCost.round())),
+          ] else
+            _costRow('Rate', rateLabel(order.side)),
+          if (order.balanceApplied > 0) ...[
+            _costRow(
+              'Outstanding balance added',
+              rupees(order.balanceApplied.round()),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(top: 4, bottom: 2),
+              child: Text(
+                'Carried over from uncollected prints left in a stack past '
+                'the free window — paying this invoice clears it.',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: AppColors.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 10),
             child: Divider(height: 1, color: AppColors.border),
@@ -540,6 +570,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
           label: Text(_busy ? 'Processing…' : 'Request Collection'),
           onPressed: _busy ? null : () => _requestAndConfirmCollection(order),
+        );
+      case OrderStatus.awaitingStack:
+        return const Padding(
+          padding: EdgeInsets.symmetric(vertical: 6),
+          child: Text(
+            'Your document is printed and waiting for a free pickup slot. '
+            "We'll notify you the moment it's ready to collect.",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
+          ),
         );
       case OrderStatus.queued:
         return OutlinedButton.icon(

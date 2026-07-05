@@ -221,13 +221,15 @@ class ApiClient {
     return (data['email'] ?? '').toString();
   }
 
-  static Future<void> verifyCollect(String jobId, String otp) async {
+  /// Returns the name of the stack the collected material was sitting in.
+  static Future<String> verifyCollect(String jobId, String otp) async {
     final res = await http.post(
       _u('/jobs/collect/verify'),
       headers: await _headers(),
       body: jsonEncode({'jobId': jobId, 'otp': otp}),
     );
-    _unwrap(res);
+    final data = _unwrap(res) as Map<String, dynamic>;
+    return (data['stackName'] ?? '').toString();
   }
 
   // ---------------- Hardware / Locations ----------------
