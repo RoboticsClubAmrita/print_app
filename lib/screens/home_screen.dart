@@ -16,6 +16,7 @@ import '../widgets/field_chip.dart';
 import '../widgets/fx.dart';
 import '../widgets/pill_toggle.dart';
 import 'order_detail_screen.dart';
+import 'print_preview_screen.dart';
 
 /// Home tab: dark hero header + the print order form card,
 /// mirroring the flight booking reference layout.
@@ -371,6 +372,27 @@ class _HomeTabState extends State<HomeTab> {
       return;
     }
     if (_placing) return;
+
+    final state = context.read<AppState>();
+    final confirmed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => PrintPreviewScreen(
+          fileName: _fileName!,
+          fileBytes: _fileBytes!,
+          totalPages: _detectedPages!,
+          selectedPages: _selectedPages,
+          copies: _copies,
+          side: _side,
+          locationName: state.selectedLocationName,
+          scheduleLabel: _scheduledAt == null
+              ? 'Now'
+              : DateFormat('MMM d • h:mm a').format(_scheduledAt!),
+          estimatedCost: _estimate,
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
     setState(() => _placing = true);
     try {
       final order = await context.read<AppState>().placeOrder(
@@ -996,6 +1018,7 @@ class _StatusDot extends StatelessWidget {
       OrderStatus.pending => AppColors.warning,
       OrderStatus.queued => AppColors.textSecondary,
       OrderStatus.printing => AppColors.warning,
+      OrderStatus.awaitingStack => AppColors.warning,
       OrderStatus.ready => AppColors.success,
       OrderStatus.collected => AppColors.success,
       OrderStatus.cancelled => AppColors.textSecondary,
