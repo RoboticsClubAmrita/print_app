@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../utils/validators.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
+import 'otp_verification_screen.dart';
 
 /// Editable profile form: Full Name, Email and Phone, with the same
 /// client-side validation as Sign Up. Persisting changes (and the OTP
@@ -25,6 +26,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late final TextEditingController _phone;
 
   late final String _originalEmail;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -55,38 +57,80 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return null;
   }
 
-  void _save() {
+  Future<void> _save() async {
     final error = _validate();
     if (error != null) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(error)));
       return;
     }
-    final emailChanged =
-        _email.text.trim().toLowerCase() != _originalEmail.toLowerCase();
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text('Almost there'),
-        content: Text(
-          emailChanged
-              ? 'Your details look valid. Saving a new email requires OTP '
-                  'verification, which is being finalised and will be enabled '
-                  'in the next update.'
-              : 'Your details look valid. Saving profile changes to the '
-                  'server will be enabled in the next update.',
-          style: const TextStyle(height: 1.5),
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Got it'),
+    setState(() => _saving = true);
+    final state = context.read<AppState>();
+    final newEmail = _email.text.trim().toLowerCase();
+    final emailChanged = newEmail != _originalEmail.toLowerCase();
+
+    try {
+      if (emailChanged) {
+        final errorMsg = await state.requestEmailChange(newEmail);
+        if (errorMsg != null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorMsg)));
+          }
+          setState(() => _saving = false);
+          return;
+        }
+
+        if (!mounted) return;
+        setState(() => _saving = false);
+
+        final verified = await Navigator.of(context).push<bool>(
+          MaterialPageRoute(
+            builder: (_) => OtpVerificationScreen(
+              title: 'Verify new email',
+              subtitle: 'Enter the 4-digit code sent to $newEmail.',
+              verifyLabel: 'Verify & Save',
+              successTitle: 'Email updated',
+              successSubtitle: 'Your profile has been updated.',
+              successIcon: Icons.mark_email_read_rounded,
+              headerIcon: Icons.mark_email_read_outlined,
+              onVerify: (code) => state.verifyEmailChange(code),
+              onResend: () => state.requestEmailChange(newEmail),
+            ),
           ),
-        ],
-      ),
-    );
+        );
+
+        if (verified != true || !mounted) return;
+        setState(() => _saving = true);
+      }
+
+      final errorMsg = await state.updateProfile(
+        name: _name.text.trim(),
+        phone: _phone.text.trim(),
+      );
+      if (errorMsg != null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorMsg)));
+        }
+        return;
+      }
+
+      if (!mounted) return;
+      await showSuccessOverlay(
+        context,
+        title: 'Profile Updated',
+        subtitle: 'Changes saved successfully.',
+        icon: Icons.person_rounded,
+      );
+      if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update profile')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -214,8 +258,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       ),
                       const SizedBox(height: 24),
                       FilledButton(
-                        onPressed: _save,
-                        child: const Text('Save Changes'),
+                        onPressed: _saving ? null : _save,
+                        child: _saving
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.white,
+                                ),
+                              )
+                            : const Text('Save Changes'),
                       ),
                     ],
                   ),

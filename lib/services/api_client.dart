@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
@@ -35,6 +35,8 @@ class ApiException implements Exception {
 /// Every backend envelope is either `{ MESSAGE, DATA }` (most endpoints) or
 /// a bespoke shape for /auth/login and /auth/logout.
 class ApiClient {
+  static VoidCallback? onUnauthorized;
+
   static Uri _u(String path) => Uri.parse('${Env.apiBaseUrl}$path');
 
   static Future<Map<String, String>> _headers({bool json = true}) async {
@@ -51,6 +53,10 @@ class ApiClient {
       body = jsonDecode(res.body) as Map<String, dynamic>;
     } catch (_) {
       throw ApiException('Unexpected server response (${res.statusCode})');
+    }
+    if (res.statusCode == 401) {
+      onUnauthorized?.call();
+      throw ApiException('Session expired. Please log in again.');
     }
     if (res.statusCode < 200 || res.statusCode >= 300) {
       final msg = body['MESSAGE'] ?? body['message'] ?? 'Request failed';
@@ -331,5 +337,46 @@ class ApiClient {
       penalties: (data['penalties'] as List<dynamic>?) ?? [],
       totalOutstanding: (data['totalOutstanding'] as num?) ?? 0,
     );
+  }
+
+  static Future<void> requestEmailChange({
+    required String userId,
+    required String newEmail,
+  }) async {
+    final res = await http.post(
+      _u('/users/change-email-request'),
+      headers: await _headers(),
+      body: jsonEncode({'userId': userId, 'newEmail': newEmail}),
+    );
+    _unwrap(res);
+  }
+
+  static Future<void> verifyEmailChange({
+    required String userId,
+    required String otp,
+  }) async {
+    final res = await http.post(
+      _u('/users/change-email-verify'),
+      headers: await _headers(),
+      body: jsonEncode({'userId': userId, 'otp': otp}),
+    );
+    _unwrap(res);
+  }
+
+  static Future<void> editUser({
+    required String userId,
+    String? name,
+    String? phone,
+  }) async {
+    final res = await http.put(
+      _u('/users/edit'),
+      headers: await _headers(),
+      body: jsonEncode({
+        'userId': userId,
+        if (name != null) 'name': name,
+        if (phone != null) 'phone': phone,
+      }),
+    );
+    _unwrap(res);
   }
 }

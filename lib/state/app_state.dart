@@ -41,6 +41,12 @@ class AppState extends ChangeNotifier {
 
   bool get isLoggedIn => user != null;
 
+  AppState() {
+    ApiClient.onUnauthorized = () {
+      logout();
+    };
+  }
+
   // ---------------- Locations ----------------
 
   Future<void> loadLocations() async {
@@ -251,6 +257,7 @@ class AppState extends ChangeNotifier {
         .map(PrintOrder.fromJob)
         .toList();
     await _notifyStatusChanges();
+    await loadPenalties();
     notifyListeners();
   }
 
@@ -406,5 +413,47 @@ class AppState extends ChangeNotifier {
     await loadPenalties();
     notifyListeners();
     return paidAmount;
+  }
+
+  // ---------------- Profile Edit ----------------
+
+  Future<String?> requestEmailChange(String newEmail) async {
+    if (user == null) return 'You are not signed in';
+    try {
+      await ApiClient.requestEmailChange(userId: user!.id, newEmail: newEmail);
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    } catch (_) {
+      return 'Could not reach the server. Check your connection.';
+    }
+  }
+
+  Future<String?> verifyEmailChange(String otp) async {
+    if (user == null) return 'You are not signed in';
+    try {
+      await ApiClient.verifyEmailChange(userId: user!.id, otp: otp);
+      await _loadUser(user!.id);
+      notifyListeners();
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    } catch (_) {
+      return 'Could not reach the server. Check your connection.';
+    }
+  }
+
+  Future<String?> updateProfile({required String name, required String phone}) async {
+    if (user == null) return 'You are not signed in';
+    try {
+      await ApiClient.editUser(userId: user!.id, name: name, phone: phone);
+      await _loadUser(user!.id);
+      notifyListeners();
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    } catch (_) {
+      return 'Could not reach the server. Check your connection.';
+    }
   }
 }

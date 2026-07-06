@@ -43,6 +43,7 @@ class _ShellScreenState extends State<ShellScreen>
   void initState() {
     super.initState();
     _appState = context.read<AppState>();
+    _appState.addListener(_onStateChange);
     // Let pushed screens (e.g. the pending-dues popup's "Go to Billing") ask
     // the shell to switch tabs.
     _appState.tabRequest.addListener(_onTabRequest);
@@ -51,6 +52,18 @@ class _ShellScreenState extends State<ShellScreen>
     _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       _appState.refreshOrders();
     });
+  }
+
+  void _onStateChange() {
+    if (!_appState.isLoggedIn && mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (route) => false,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Session expired. Please log in again.')),
+      );
+    }
   }
 
   void _onTabRequest() {
@@ -63,6 +76,7 @@ class _ShellScreenState extends State<ShellScreen>
 
   @override
   void dispose() {
+    _appState.removeListener(_onStateChange);
     _appState.tabRequest.removeListener(_onTabRequest);
     _pollTimer?.cancel();
     _tabCurve.dispose();
