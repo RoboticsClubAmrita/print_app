@@ -156,21 +156,34 @@ Future<void> showSuccessOverlay(
   required String title,
   String? subtitle,
   IconData icon = Icons.check_rounded,
-  Duration hold = const Duration(milliseconds: 1350),
+  Duration hold = const Duration(milliseconds: 3000),
 }) async {
   HapticFeedback.mediumImpact();
   await showGeneralDialog<void>(
     context: context,
-    barrierDismissible: false,
+    barrierDismissible: true,
     barrierColor: Colors.black.withValues(alpha: 0.55),
     barrierLabel: title,
     transitionDuration: AppMotion.normal,
     pageBuilder: (dialogContext, _, __) {
+      bool dismissed = false;
       Future.delayed(hold, () {
-        if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+        if (dialogContext.mounted && !dismissed) {
+          dismissed = true;
+          Navigator.of(dialogContext).pop();
+        }
       });
-      return Center(
-        child: _SuccessCard(title: title, subtitle: subtitle, icon: icon),
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          if (dialogContext.mounted && !dismissed) {
+            dismissed = true;
+            Navigator.of(dialogContext).pop();
+          }
+        },
+        child: Center(
+          child: _SuccessCard(title: title, subtitle: subtitle, icon: icon),
+        ),
       );
     },
     transitionBuilder: (context, animation, _, child) {
@@ -183,6 +196,7 @@ Future<void> showSuccessOverlay(
     },
   );
 }
+
 
 class _SuccessCard extends StatelessWidget {
   final String title;
