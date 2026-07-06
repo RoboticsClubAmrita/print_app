@@ -48,12 +48,31 @@ class _HomeTabState extends State<HomeTab> {
   bool _uploading = false;
   bool _placing = false;
 
+  /// Real per-page rate from the backend's pricing table (A4/BW — the
+  /// only size/color this form offers) — replaces the flat local
+  /// estimate so the shown price always matches what's actually billed.
+  num? _ratePerPage;
+
   PrintSide get _side => _sideIndex == 0 ? PrintSide.single : PrintSide.double;
 
   int get _selectedPageCount => _selectedPages?.length ?? (_detectedPages ?? 0);
 
-  int get _estimate =>
-      printCost(pages: _selectedPageCount, copies: _copies, side: _side);
+  int get _estimate => _ratePerPage != null
+      ? (_ratePerPage! * _selectedPageCount * _copies).round()
+      : printCost(pages: _selectedPageCount, copies: _copies, side: _side);
+
+  Future<void> _loadRate() async {
+    try {
+      final rate = await ApiClient.pricingLookup(
+        size: 'A4',
+        type: 'bw',
+        side: _side == PrintSide.single ? 'single' : 'double',
+      );
+      if (mounted) setState(() => _ratePerPage = rate);
+    } catch (_) {
+      // Non-critical — falls back to the local flat-rate estimate.
+    }
+  }
 
   Future<void> _pickPageRange() async {
     if (_detectedPages == null) return;
@@ -114,6 +133,7 @@ class _HomeTabState extends State<HomeTab> {
     super.initState();
     final state = context.read<AppState>();
     if (state.locations.isEmpty) state.loadLocations();
+    _loadRate();
   }
 
   Future<void> _pickLocation() async {
@@ -340,11 +360,12 @@ class _HomeTabState extends State<HomeTab> {
       return;
     }
     final now = DateTime.now();
+    final maxDays = context.read<AppState>().maxScheduleDaysAhead;
     final date = await showDatePicker(
       context: context,
       initialDate: now,
       firstDate: now,
-      lastDate: now.add(const Duration(days: 30)),
+      lastDate: now.add(Duration(days: maxDays)),
     );
     if (date == null || !mounted) return;
     final time = await showTimePicker(
@@ -400,6 +421,8 @@ class _HomeTabState extends State<HomeTab> {
             pages: _selectedPageCount,
             copies: _copies,
             side: _side,
+            selectedPages: _selectedPages,
+            scheduledFor: _scheduledAt,
           );
       if (!mounted) return;
       setState(() {
@@ -671,7 +694,10 @@ class _HomeTabState extends State<HomeTab> {
           PillToggle(
             options: const ['Single-sided', 'Double-sided'],
             selectedIndex: _sideIndex,
-            onChanged: (i) => setState(() => _sideIndex = i),
+            onChanged: (i) {
+              setState(() => _sideIndex = i);
+              _loadRate();
+            },
           ),
           const SizedBox(height: 14),
           FieldChip(
@@ -776,7 +802,9 @@ class _HomeTabState extends State<HomeTab> {
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Text(
-                    rateLabel(_side),
+                    _ratePerPage != null
+                        ? '₹$_ratePerPage / page'
+                        : rateLabel(_side),
                     style: const TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
@@ -1016,6 +1044,7 @@ class _StatusDot extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = switch (status) {
       OrderStatus.pending => AppColors.warning,
+      OrderStatus.scheduled => AppColors.textSecondary,
       OrderStatus.queued => AppColors.textSecondary,
       OrderStatus.printing => AppColors.warning,
       OrderStatus.awaitingStack => AppColors.warning,

@@ -14,6 +14,7 @@ class StatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final (dot, filled) = switch (status) {
       OrderStatus.pending => (AppColors.warning, false),
+      OrderStatus.scheduled => (AppColors.textSecondary, false),
       OrderStatus.queued => (AppColors.textSecondary, false),
       OrderStatus.printing => (AppColors.warning, true),
       OrderStatus.awaitingStack => (AppColors.warning, false),

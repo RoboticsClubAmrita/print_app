@@ -175,6 +175,10 @@ class ApiClient {
     required int copies,
     required int totalPagesToPrint,
     String? locationId,
+    List<int>? selectedPages,
+    String? scheduleType, // NOW | SCHEDULED
+    DateTime? scheduledFor,
+    String? idempotencyKey,
   }) async {
     final res = await http.post(
       _u('/jobs/create'),
@@ -186,6 +190,10 @@ class ApiClient {
         'copies': copies,
         'totalPagesToPrint': totalPagesToPrint,
         if (locationId != null) 'locationId': locationId,
+        if (selectedPages != null) 'selectedPages': selectedPages,
+        if (scheduleType != null) 'scheduleType': scheduleType,
+        if (scheduledFor != null) 'scheduledFor': scheduledFor.toUtc().toIso8601String(),
+        if (idempotencyKey != null) 'idempotencyKey': idempotencyKey,
       }),
     );
     return _unwrap(res) as Map<String, dynamic>; // { jobId, referenceId }
@@ -286,5 +294,40 @@ class ApiClient {
       }),
     );
     return _unwrap(res) as Map<String, dynamic>;
+  }
+
+  /// Creates a Razorpay order to pay off outstanding penalties directly,
+  /// independent of any print job (Billing tab "Pay Dues").
+  static Future<Map<String, dynamic>> createPenaltyOrder(String userId) async {
+    final res = await http.post(
+      _u('/payments/penalties/create-order'),
+      headers: await _headers(),
+      body: jsonEncode({'userId': userId}),
+    );
+    return _unwrap(res) as Map<String, dynamic>;
+  }
+
+  // ---------------- Business Config ----------------
+
+  /// Displayable business rules (penalty rate/free window, scheduling
+  /// limits) — read live from the backend so the app never guesses.
+  static Future<Map<String, dynamic>> getPublicConfig() async {
+    final res = await http.get(_u('/config/public'), headers: await _headers());
+    return _unwrap(res) as Map<String, dynamic>;
+  }
+
+  // ---------------- Penalties ----------------
+
+  /// Outstanding penalty line items for a user, plus the total owed —
+  /// backs the Billing tab's "Outstanding dues" card.
+  static Future<({List<dynamic> penalties, num totalOutstanding})> getUserPenalties(
+    String userId,
+  ) async {
+    final res = await http.get(_u('/penalties/user/$userId'), headers: await _headers());
+    final data = _unwrap(res) as Map<String, dynamic>;
+    return (
+      penalties: (data['penalties'] as List<dynamic>?) ?? [],
+      totalOutstanding: (data['totalOutstanding'] as num?) ?? 0,
+    );
   }
 }

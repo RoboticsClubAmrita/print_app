@@ -4,6 +4,7 @@ import '../models/print_order.dart';
 import '../models/user.dart';
 import '../services/api_client.dart';
 import '../services/notification_service.dart';
+import '../services/razorpay_service.dart';
 import '../services/session_store.dart';
 
 /// A single entry in the in-app notification history (shown when the
@@ -24,6 +25,9 @@ class AppState extends ChangeNotifier {
   String? selectedLocationId;
   String? selectedLocationName;
   List<Map<String, dynamic>> pricing = [];
+  Map<String, dynamic>? publicConfig;
+  List<dynamic> penalties = [];
+  num outstandingDues = 0;
   final List<AppNotification> notifications = [];
 
   final Map<String, OrderStatus> _lastKnownStatus = {};
@@ -60,6 +64,23 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  // ---------------- Business config ----------------
+
+  /// Displayable business rules (penalty rate/free window, scheduling
+  /// limits) — read live from the backend so nothing is guessed
+  /// client-side. Falls back to safe UI defaults on failure.
+  Future<void> loadPublicConfig() async {
+    try {
+      publicConfig = await ApiClient.getPublicConfig();
+      notifyListeners();
+    } catch (_) {
+      // Non-critical — screens fall back to sane hardcoded defaults.
+    }
+  }
+
+  int get maxScheduleDaysAhead =>
+      (publicConfig?['scheduling']?['maxDaysAhead'] as num?)?.toInt() ?? 30;
+
   // ---------------- Session ----------------
 
   /// Called on app start: restores a saved session, if any.
@@ -71,6 +92,7 @@ class AppState extends ChangeNotifier {
       await _loadUser(userId);
       await refreshOrders();
       await loadLocations();
+      await loadPublicConfig();
       return true;
     } catch (_) {
       await SessionStore.clear();
@@ -101,6 +123,7 @@ class AppState extends ChangeNotifier {
       await SessionStore.save(token: token, userId: userId);
       await _loadUser(userId);
       await refreshOrders();
+      await loadPublicConfig();
       notifyListeners();
       return null;
     } on ApiException catch (e) {
@@ -218,6 +241,12 @@ class AppState extends ChangeNotifier {
             ),
           OrderStatus.ready => ('Ready to collect!', '${order.fileName} is ready — come collect it.'),
           OrderStatus.collected => ('Collected', '${order.fileName} was collected. Thanks!'),
+          // Only the SCHEDULED→QUEUED promotion is notable — a normal
+          // PENDING→QUEUED right after payment doesn't need its own alert.
+          OrderStatus.queued when previous == OrderStatus.scheduled => (
+              'Scheduled print queued',
+              '${order.fileName} is now in the print queue.'
+            ),
           _ => (null, null),
         };
         if (title != null) {
@@ -259,6 +288,8 @@ class AppState extends ChangeNotifier {
     required int pages,
     required int copies,
     required PrintSide side,
+    List<int>? selectedPages,
+    DateTime? scheduledFor,
   }) async {
     if (user == null) throw ApiException('You are not signed in');
 
@@ -269,6 +300,9 @@ class AppState extends ChangeNotifier {
       copies: copies,
       totalPagesToPrint: pages,
       locationId: selectedLocationId,
+      selectedPages: selectedPages,
+      scheduleType: scheduledFor != null ? 'SCHEDULED' : 'NOW',
+      scheduledFor: scheduledFor,
     );
     final job = await ApiClient.getJobById(created['jobId'].toString());
     final order = PrintOrder.fromJob(job);
@@ -303,4 +337,47 @@ class AppState extends ChangeNotifier {
   int get totalDue => unpaidOrders.fold(0, (sum, o) => sum + o.cost);
 
   int get totalSpent => paidOrders.fold(0, (sum, o) => sum + o.cost);
+
+  // ---------------- Penalties / outstanding dues ----------------
+
+  /// Loads the user's outstanding penalty ledger — the auditable list
+  /// backing the Billing tab's "Outstanding dues" card. Always reads
+  /// from the backend; never trusts a locally-cached total.
+  Future<void> loadPenalties() async {
+    if (user == null) return;
+    try {
+      final result = await ApiClient.getUserPenalties(user!.id);
+      penalties = result.penalties;
+      outstandingDues = result.totalOutstanding;
+      notifyListeners();
+    } catch (_) {
+      // Non-critical — the dues card just shows nothing until retried.
+    }
+  }
+
+  /// Pays off all outstanding dues directly (independent of any print
+  /// job) via Razorpay. Returns the paid amount on success.
+  Future<num> payOutstandingDues() async {
+    if (user == null) throw ApiException('You are not signed in');
+    final created = await ApiClient.createPenaltyOrder(user!.id);
+    final result = await RazorpayService.checkout(
+      keyId: created['keyId'].toString(),
+      orderId: created['orderId'].toString(),
+      amountInPaise: (created['amountInPaise'] as num).toInt(),
+      name: user?.name ?? 'PrintEase User',
+      description: 'Outstanding dues',
+      userEmail: user?.email,
+      userPhone: user?.phone,
+    );
+    await ApiClient.verifyPayment(
+      razorpayOrderId: result.orderId,
+      razorpayPaymentId: result.paymentId,
+      razorpaySignature: result.signature,
+    );
+    final paidAmount = (created['amount'] as num?) ?? 0;
+    await _loadUser(user!.id);
+    await loadPenalties();
+    notifyListeners();
+    return paidAmount;
+  }
 }

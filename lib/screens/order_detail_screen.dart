@@ -323,8 +323,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final steps = _timelineSteps;
     // awaitingStack (printed, no free stack yet) sits at the same node as
     // ready (printed and sitting in a stack) — both mean "printing is done".
-    final displayStatus =
-        order.status == OrderStatus.awaitingStack ? OrderStatus.ready : order.status;
+    // scheduled (paid, holding until its print time) sits at the same node
+    // as pending — both are "before the print queue".
+    final displayStatus = switch (order.status) {
+      OrderStatus.awaitingStack => OrderStatus.ready,
+      OrderStatus.scheduled => OrderStatus.pending,
+      _ => order.status,
+    };
     final currentIndex = steps.indexOf(displayStatus);
     return Container(
       padding: const EdgeInsets.all(20),
@@ -565,11 +570,43 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           label: Text(_busy ? 'Processing…' : 'Pay ${rupees(order.cost)}'),
           onPressed: _busy ? null : () => _payNow(order),
         );
+      case OrderStatus.scheduled:
+        return Column(
+          children: [
+            if (order.scheduledFor != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  'Scheduled for ${DateFormat('MMM d, h:mm a').format(order.scheduledFor!)}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
+                ),
+              ),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.cancel_outlined, size: 20),
+              label: Text(_busy ? 'Cancelling…' : 'Cancel Order'),
+              onPressed: _busy ? null : () => _cancel(order),
+            ),
+          ],
+        );
       case OrderStatus.ready:
-        return FilledButton.icon(
-          icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
-          label: Text(_busy ? 'Processing…' : 'Request Collection'),
-          onPressed: _busy ? null : () => _requestAndConfirmCollection(order),
+        return Column(
+          children: [
+            if (order.stackName != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  'Collect from Stack ${order.stackName}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+            FilledButton.icon(
+              icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
+              label: Text(_busy ? 'Processing…' : 'Request Collection'),
+              onPressed: _busy ? null : () => _requestAndConfirmCollection(order),
+            ),
+          ],
         );
       case OrderStatus.awaitingStack:
         return const Padding(
@@ -603,15 +640,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             color: AppColors.white,
             borderRadius: BorderRadius.circular(22),
           ),
-          child: const Row(
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.check_circle_rounded,
+              const Icon(Icons.check_circle_rounded,
                   color: AppColors.success, size: 22),
-              SizedBox(width: 10),
+              const SizedBox(width: 10),
               Text(
-                'Collected — thank you!',
-                style: TextStyle(fontWeight: FontWeight.w800),
+                order.collectedStackName != null
+                    ? 'Collected from Stack ${order.collectedStackName} — thank you!'
+                    : 'Collected — thank you!',
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             ],
           ),

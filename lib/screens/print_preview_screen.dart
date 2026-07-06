@@ -109,13 +109,14 @@ class PrintPreviewScreen extends StatelessWidget {
   Widget _previewCard() {
     Widget preview;
     if (_extension == 'pdf') {
-      // Always preview every page of the document (rather than trying to
-      // restrict to the selected range) — the exact selection is called
-      // out below in the settings summary instead.
+      // PdfPreview's `pages` is 0-based; selectedPages is 1-based sorted
+      // page numbers (or null = every page) — this is the one and only
+      // conversion site between the two conventions.
       preview = SizedBox(
         height: 460,
         child: PdfPreview(
           build: (format) async => fileBytes,
+          pages: selectedPages?.map((p) => p - 1).toList(),
           useActions: false,
           canDebug: false,
           dpi: 120,

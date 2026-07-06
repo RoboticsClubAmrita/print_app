@@ -22,6 +22,36 @@ class BillingTab extends StatefulWidget {
 
 class _BillingTabState extends State<BillingTab> {
   bool _paying = false;
+  bool _payingDues = false;
+
+  @override
+  void initState() {
+    super.initState();
+    context.read<AppState>().loadPenalties();
+  }
+
+  Future<void> _payDues(AppState state) async {
+    if (_payingDues) return;
+    setState(() => _payingDues = true);
+    try {
+      final paidAmount = await state.payOutstandingDues();
+      if (!mounted) return;
+      await showSuccessOverlay(
+        context,
+        title: 'Dues Cleared',
+        subtitle: '${rupees(paidAmount.round())} paid — you are all set.',
+        icon: Icons.account_balance_wallet_rounded,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : 'Payment failed')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _payingDues = false);
+    }
+  }
 
   Future<void> _payAllDue(AppState state) async {
     if (_paying) return;
@@ -100,6 +130,13 @@ class _BillingTabState extends State<BillingTab> {
             delay: const Duration(milliseconds: 90),
             child: _statementCard(context, state, unpaid.length),
           ),
+          if (state.outstandingDues > 0) ...[
+            const SizedBox(height: 16),
+            FadeSlideIn(
+              delay: const Duration(milliseconds: 120),
+              child: _duesCard(state),
+            ),
+          ],
           if (unpaid.isNotEmpty) ...[
             const SizedBox(height: 26),
             const FadeSlideIn(
@@ -241,6 +278,76 @@ class _BillingTabState extends State<BillingTab> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _duesCard(AppState state) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded,
+                  size: 20, color: AppColors.warning),
+              const SizedBox(width: 8),
+              const Text(
+                'Outstanding Dues',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+              const Spacer(),
+              Text(
+                rupees(state.outstandingDues.round()),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Storage fees from uncollected prints left in a stack past the '
+            'free window.',
+            style: TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.4),
+          ),
+          if (state.penalties.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            for (final p in state.penalties)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        (p['referenceId'] ?? 'Print job').toString(),
+                        style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
+                      ),
+                    ),
+                    Text(
+                      rupees((((p['amount'] as num?) ?? 0) - ((p['settledAmount'] as num?) ?? 0)).round()),
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+          const SizedBox(height: 14),
+          FilledButton(
+            onPressed: _payingDues ? null : () => _payDues(state),
+            child: _payingDues
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                  )
+                : const Text('Pay Dues'),
+          ),
+        ],
       ),
     );
   }

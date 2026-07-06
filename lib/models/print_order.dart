@@ -2,6 +2,7 @@ import '../data/pricing.dart';
 
 enum OrderStatus {
   pending,
+  scheduled,
   queued,
   printing,
   awaitingStack,
@@ -16,6 +17,7 @@ enum PrintSide { single, double }
 extension OrderStatusLabel on OrderStatus {
   String get label => switch (this) {
         OrderStatus.pending => 'Awaiting Payment',
+        OrderStatus.scheduled => 'Scheduled',
         OrderStatus.queued => 'Queued',
         OrderStatus.printing => 'Printing',
         OrderStatus.awaitingStack => 'Waiting for Pickup Slot',
@@ -33,6 +35,7 @@ extension OrderStatusLabel on OrderStatus {
   /// that isn't actually sitting in a stack, which the backend then rejects.
   static OrderStatus fromBackend(String? status) => switch (status) {
         'PENDING' => OrderStatus.pending,
+        'SCHEDULED' => OrderStatus.scheduled,
         'QUEUED' => OrderStatus.queued,
         'PRINTING' => OrderStatus.printing,
         'PRINTED_PENDING_STACK' => OrderStatus.awaitingStack,
@@ -85,6 +88,20 @@ class PrintOrder {
 
   final String colorMode; // BW | COLOR
   final String pageType; // A2 | A3 | A4
+
+  /// 1-based selected page numbers, sorted; null means "all pages".
+  final List<int>? selectedPages;
+
+  /// Stack currently holding this job's material (set while COMPLETED).
+  final String? stackName;
+
+  /// Stack it was collected from — frozen at collection time, survives
+  /// the stack being reused by a later job.
+  final String? collectedStackName;
+
+  final String scheduleType; // NOW | SCHEDULED
+  final DateTime? scheduledFor;
+
   OrderStatus status;
 
   PrintOrder({
@@ -105,11 +122,19 @@ class PrintOrder {
     this.balanceApplied = 0,
     this.colorMode = 'BW',
     this.pageType = 'A4',
+    this.selectedPages,
+    this.stackName,
+    this.collectedStackName,
+    this.scheduleType = 'NOW',
+    this.scheduledFor,
   });
 
   factory PrintOrder.fromJob(Map<String, dynamic> job) {
     final createdAt =
         DateTime.tryParse(job['createdAt']?.toString() ?? '') ?? DateTime.now();
+    final scheduleType = (job['scheduleType'] ?? 'NOW').toString();
+    final scheduledFor = DateTime.tryParse(job['scheduledFor']?.toString() ?? '');
+    final rawSelectedPages = job['selectedPages'];
     return PrintOrder(
       id: (job['referenceId'] ?? job['_id'] ?? '').toString(),
       jobId: (job['_id'] ?? '').toString(),
@@ -119,8 +144,8 @@ class PrintOrder {
       copies: (job['copies'] as num?)?.toInt() ?? 1,
       side: PrintSideLabel.fromBackend(job['printSide']?.toString()),
       createdAt: createdAt,
-      scheduledAt: createdAt,
-      scheduledNow: true,
+      scheduledAt: scheduledFor ?? createdAt,
+      scheduledNow: scheduleType != 'SCHEDULED',
       status: OrderStatusLabel.fromBackend(job['status']?.toString()),
       backendCost: (job['totalCost'] as num?) ?? 0,
       costPerPage: (job['costPerPage'] as num?) ?? 0,
@@ -128,6 +153,13 @@ class PrintOrder {
       balanceApplied: (job['balanceApplied'] as num?) ?? 0,
       colorMode: (job['colorMode'] ?? 'BW').toString(),
       pageType: (job['pageType'] ?? 'A4').toString(),
+      selectedPages: rawSelectedPages is List
+          ? rawSelectedPages.map((p) => (p as num).toInt()).toList()
+          : null,
+      stackName: job['stackName']?.toString(),
+      collectedStackName: job['collectedStackName']?.toString(),
+      scheduleType: scheduleType,
+      scheduledFor: scheduledFor,
     );
   }
 
