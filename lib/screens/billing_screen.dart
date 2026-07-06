@@ -23,6 +23,7 @@ class BillingTab extends StatefulWidget {
 class _BillingTabState extends State<BillingTab> {
   bool _paying = false;
   bool _payingDues = false;
+  bool _breakdownExpanded = false;
 
   @override
   void initState() {
@@ -139,21 +140,59 @@ class _BillingTabState extends State<BillingTab> {
           ],
           if (unpaid.isNotEmpty) ...[
             const SizedBox(height: 26),
-            const FadeSlideIn(
-              delay: Duration(milliseconds: 160),
-              child: Text(
-                'Cost Breakdown',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            FadeSlideIn(
+              delay: const Duration(milliseconds: 160),
+              child: Pressable(
+                onTap: () => setState(() => _breakdownExpanded = !_breakdownExpanded),
+                child: Row(
+                  children: [
+                    const Text(
+                      'Cost Breakdown',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(width: 6),
+                    AnimatedRotation(
+                      turns: _breakdownExpanded ? 0.5 : 0,
+                      duration: AppMotion.fast,
+                      curve: AppMotion.ease,
+                      child: const Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        size: 24,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${unpaid.length} order${unpaid.length > 1 ? 's' : ''}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 12),
-            for (var i = 0; i < unpaid.length; i++) ...[
-              FadeSlideIn(
-                delay: Duration(milliseconds: 200 + 50 * (i < 5 ? i : 5)),
-                child: _breakdownCard(unpaid[i]),
+            AnimatedCrossFade(
+              firstChild: const SizedBox.shrink(),
+              secondChild: Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Column(
+                  children: [
+                    for (var i = 0; i < unpaid.length; i++) ...[
+                      _breakdownCard(unpaid[i]),
+                      if (i < unpaid.length - 1) const SizedBox(height: 12),
+                    ],
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
-            ],
+              crossFadeState: _breakdownExpanded
+                  ? CrossFadeState.showSecond
+                  : CrossFadeState.showFirst,
+              duration: AppMotion.normal,
+              sizeCurve: AppMotion.ease,
+            ),
           ],
           const SizedBox(height: 14),
           const FadeSlideIn(

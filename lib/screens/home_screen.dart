@@ -14,6 +14,7 @@ import '../utils/page_range.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/field_chip.dart';
 import '../widgets/fx.dart';
+import '../widgets/upload_progress.dart';
 import '../widgets/pill_toggle.dart';
 import 'order_detail_screen.dart';
 import 'print_preview_screen.dart';
@@ -294,8 +295,17 @@ class _HomeTabState extends State<HomeTab> {
   Future<void> _uploadPicked() async {
     if (_fileBytes == null || _fileName == null) return;
     setState(() => _uploading = true);
+
+    final state = context.read<AppState>();
+    // Show the premium overlay while the upload + page analysis runs.
+    final overlay = await showUploadOverlay(context, fileName: _fileName!);
+    if (!mounted) {
+      overlay.dismiss();
+      return;
+    }
+
     try {
-      final uploaded = await context.read<AppState>().uploadDocument(
+      final uploaded = await state.uploadDocument(
             fileBytes: _fileBytes!,
             fileName: _fileName!,
           );
@@ -315,6 +325,7 @@ class _HomeTabState extends State<HomeTab> {
         );
       }
     } finally {
+      overlay.dismiss();
       if (mounted) setState(() => _uploading = false);
     }
   }

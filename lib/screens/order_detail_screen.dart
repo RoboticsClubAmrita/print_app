@@ -11,6 +11,7 @@ import '../theme/app_theme.dart';
 import '../widgets/fx.dart';
 import '../widgets/status_chip.dart';
 import '../widgets/ticket_card.dart';
+import 'otp_verification_screen.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   final String orderId;
@@ -77,61 +78,76 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   Future<void> _requestAndConfirmCollection(PrintOrder order) async {
     if (_busy) return;
-    setState(() => _busy = true);
     final state = context.read<AppState>();
-    try {
-      final email = await state.requestCollection(order);
-      if (!mounted) return;
-      final otp = await _promptForOtp(email);
-      if (otp == null || !mounted) return;
-      final stackName = await state.confirmCollection(order, otp);
-      if (!mounted) return;
-      await showSuccessOverlay(
-        context,
-        title: 'Collection Confirmed',
-        subtitle: stackName.isEmpty
-            ? 'Enjoy your prints!'
-            : 'Your prints were at Stack $stackName. Enjoy!',
-        icon: Icons.inventory_2_rounded,
-      );
-    } on ApiException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-    } finally {
-      if (mounted) setState(() => _busy = false);
+
+    // Enforce outstanding dues before any collection OTP is generated.
+    if (state.outstandingDues > 0) {
+      await _showPendingDuesPopup(state);
+      return;
     }
+
+    setState(() => _busy = true);
+    final String email;
+    try {
+      email = await state.requestCollection(order);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+
+    // The OTP screen owns verification and its own success animation; the
+    // stack refresh happens inside confirmCollection.
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => OtpVerificationScreen(
+          title: 'Confirm collection',
+          subtitle: 'Enter the 4-digit code sent to '
+              '${email.isEmpty ? 'your email' : email}.',
+          verifyLabel: 'Confirm collection',
+          successTitle: 'Collection Confirmed',
+          successSubtitle: 'Enjoy your prints!',
+          successIcon: Icons.inventory_2_rounded,
+          headerIcon: Icons.local_shipping_outlined,
+          onVerify: (code) async {
+            try {
+              await state.confirmCollection(order, code);
+              return null;
+            } on ApiException catch (e) {
+              return e.message;
+            }
+          },
+          onResend: () async {
+            try {
+              await state.requestCollection(order);
+              return null;
+            } on ApiException catch (e) {
+              return e.message;
+            }
+          },
+        ),
+      ),
+    );
   }
 
-  Future<String?> _promptForOtp(String email) async {
-    final controller = TextEditingController();
-    return showDialog<String>(
+  /// Premium blocker shown when the user still owes money: no OTP is generated
+  /// and the only action is to head to Billing. Dismissible only by tapping
+  /// outside (no close button, no timeout).
+  Future<void> _showPendingDuesPopup(AppState state) {
+    return showDialog<void>(
       context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Confirm collection'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Enter the OTP sent to ${email.isEmpty ? 'your email' : email}.'),
-            const SizedBox(height: 14),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              maxLength: 4,
-              decoration: const InputDecoration(hintText: '1234'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
-            child: const Text('Confirm'),
-          ),
-        ],
+      barrierDismissible: true,
+      builder: (dialogContext) => _PendingDuesDialog(
+        amount: state.outstandingDues,
+        onGoToBilling: () {
+          Navigator.of(dialogContext).pop();
+          Navigator.of(context).popUntil((route) => route.isFirst);
+          state.requestTab(2);
+        },
       ),
     );
   }
@@ -659,5 +675,83 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       case OrderStatus.failed:
         return const SizedBox.shrink();
     }
+  }
+}
+
+/// The pending-dues blocker card. Only "Go to Billing" acts; tapping the
+/// dimmed backdrop dismisses it.
+class _PendingDuesDialog extends StatelessWidget {
+  final num amount;
+  final VoidCallback onGoToBilling;
+
+  const _PendingDuesDialog({required this.amount, required this.onGoToBilling});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(24, 28, 24, 22),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(28),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.account_balance_wallet_rounded,
+                  color: AppColors.warning, size: 32),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              'Pending Dues',
+              style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'You have pending dues. Please complete the payment before '
+              'collecting your printed materials.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13.5,
+                height: 1.5,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            if (amount > 0) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Outstanding: ${rupees(amount.round())}',
+                style:
+                    const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
+              ),
+            ],
+            const SizedBox(height: 22),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onGoToBilling,
+                icon: const Icon(Icons.account_balance_wallet_outlined,
+                    size: 20),
+                label: const Text('Go to Billing'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Tap outside to dismiss',
+              style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

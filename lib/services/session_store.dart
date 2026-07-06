@@ -1,7 +1,8 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Persists the JWT and user id issued by POST /auth/login so the
-/// session survives app restarts.
+/// session survives app restarts, plus the "remember me" preference and
+/// the one-time onboarding flag.
 class SessionStore {
   static const _storage = FlutterSecureStorage();
   static const _tokenKey = 'auth_token';
@@ -15,26 +16,54 @@ class SessionStore {
   static Future<String?> get token => _storage.read(key: _tokenKey);
   static Future<String?> get userId => _storage.read(key: _userIdKey);
 
+  /// Clears every piece of stored *authentication* data (token, user id and
+  /// the remember-me preference). Called on logout and on a failed restore.
+  /// The onboarding flag is intentionally left untouched — it is not auth
+  /// data and should not reappear after a logout.
   static Future<void> clear() async {
     await _storage.delete(key: _tokenKey);
     await _storage.delete(key: _userIdKey);
+    await clearRemember();
   }
 
   // ---------------- Remember me ----------------
+  //
+  // We deliberately do NOT persist the raw password. "Remember me" keeps the
+  // secure JWT session alive across restarts (gated by [rememberMe]) and only
+  // remembers the email address to pre-fill the login form.
 
+  static const _rememberFlagKey = 'remember_me';
   static const _rememberEmailKey = 'remember_email';
-  static const _rememberPasswordKey = 'remember_password';
 
-  static Future<void> saveCredentials({required String email, required String password}) async {
-    await _storage.write(key: _rememberEmailKey, value: email);
-    await _storage.write(key: _rememberPasswordKey, value: password);
+  /// Records the remember-me choice at login time. When [remember] is false
+  /// the saved email is cleared so the next launch starts clean.
+  static Future<void> setRemember({required bool remember, String? email}) async {
+    await _storage.write(key: _rememberFlagKey, value: remember ? 'true' : 'false');
+    if (remember && email != null) {
+      await _storage.write(key: _rememberEmailKey, value: email);
+    } else {
+      await _storage.delete(key: _rememberEmailKey);
+    }
   }
+
+  static Future<bool> get rememberMe async =>
+      (await _storage.read(key: _rememberFlagKey)) == 'true';
 
   static Future<String?> get savedEmail => _storage.read(key: _rememberEmailKey);
-  static Future<String?> get savedPassword => _storage.read(key: _rememberPasswordKey);
 
-  static Future<void> clearCredentials() async {
+  static Future<void> clearRemember() async {
+    await _storage.delete(key: _rememberFlagKey);
     await _storage.delete(key: _rememberEmailKey);
-    await _storage.delete(key: _rememberPasswordKey);
   }
+
+  // ---------------- Onboarding walkthrough ----------------
+
+  static const _seenWalkthroughKey = 'seen_walkthrough';
+
+  /// True once the first-run "Explore Printing" walkthrough has been shown.
+  static Future<bool> get seenWalkthrough async =>
+      (await _storage.read(key: _seenWalkthroughKey)) == 'true';
+
+  static Future<void> markWalkthroughSeen() =>
+      _storage.write(key: _seenWalkthroughKey, value: 'true');
 }

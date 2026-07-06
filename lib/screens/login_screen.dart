@@ -33,12 +33,12 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _loadSavedCredentials() async {
+    // We never store the raw password; "remember me" only pre-fills the email
+    // and keeps the secure token session alive across restarts.
     final email = await SessionStore.savedEmail;
-    final password = await SessionStore.savedPassword;
-    if (!mounted || email == null || password == null) return;
+    if (!mounted || email == null || email.isEmpty) return;
     setState(() {
       _email.text = email;
-      _password.text = password;
       _rememberMe = true;
     });
   }
@@ -67,11 +67,10 @@ class _LoginScreenState extends State<LoginScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
       return;
     }
-    if (_rememberMe) {
-      await SessionStore.saveCredentials(email: _email.text.trim(), password: _password.text);
-    } else {
-      await SessionStore.clearCredentials();
-    }
+    await SessionStore.setRemember(
+      remember: _rememberMe,
+      email: _email.text.trim(),
+    );
     if (!mounted) return;
     _goToApp();
   }

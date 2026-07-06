@@ -30,6 +30,13 @@ class AppState extends ChangeNotifier {
   num outstandingDues = 0;
   final List<AppNotification> notifications = [];
 
+  /// One-shot request for the shell to switch bottom-nav tabs (e.g. the
+  /// pending-dues popup's "Go to Billing"). The shell consumes it and resets
+  /// it to null, so the same tab can be requested again later.
+  final ValueNotifier<int?> tabRequest = ValueNotifier<int?>(null);
+
+  void requestTab(int index) => tabRequest.value = index;
+
   final Map<String, OrderStatus> _lastKnownStatus = {};
 
   bool get isLoggedIn => user != null;
@@ -88,6 +95,12 @@ class AppState extends ChangeNotifier {
     final token = await SessionStore.token;
     final userId = await SessionStore.userId;
     if (token == null || userId == null) return false;
+    // Only auto-restore when the user opted to stay signed in. Otherwise drop
+    // the stored session so this launch requires a fresh login.
+    if (!await SessionStore.rememberMe) {
+      await SessionStore.clear();
+      return false;
+    }
     try {
       await _loadUser(userId);
       await refreshOrders();
@@ -135,18 +148,32 @@ class AppState extends ChangeNotifier {
 
   /// Returns null on success, or an error message. On success the caller
   /// must still verify the email OTP before the user can log in.
-  Future<String?> register(String name, String email, String password) async {
-    if (name.trim().isEmpty || email.trim().isEmpty || password.isEmpty) {
+  ///
+  /// The College ID is sent fully upper-cased (the backend also enforces this
+  /// in Phase B); [role] is one of 'STUDENT' / 'FACULTY'.
+  Future<String?> register({
+    required String name,
+    required String email,
+    required String password,
+    required String collegeId,
+    required String phone,
+    required String role,
+  }) async {
+    if (name.trim().isEmpty ||
+        email.trim().isEmpty ||
+        password.isEmpty ||
+        collegeId.trim().isEmpty ||
+        phone.trim().isEmpty) {
       return 'Fill in all fields to register';
     }
     try {
-      final collegeId = 'GEN-${email.trim().hashCode.toUnsigned(20)}';
       await ApiClient.registerUser(
-        collegeId: collegeId,
+        collegeId: collegeId.trim().toUpperCase(),
         name: name.trim(),
         email: email.trim(),
-        phone: '',
+        phone: phone.trim(),
         password: password,
+        role: role,
       );
       return null;
     } on ApiException catch (e) {

@@ -10,9 +10,11 @@ import '../widgets/bottom_nav.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
 import 'billing_screen.dart';
+import 'edit_profile_screen.dart';
 import 'home_screen.dart';
 import 'login_screen.dart';
 import 'orders_screen.dart';
+import 'walkthrough_screen.dart';
 
 /// Hosts the four tabs behind the floating black pill navigation.
 class ShellScreen extends StatefulWidget {
@@ -35,19 +37,33 @@ class _ShellScreenState extends State<ShellScreen>
     curve: Curves.easeOutQuart,
   );
   Timer? _pollTimer;
+  late final AppState _appState;
 
   @override
   void initState() {
     super.initState();
+    _appState = context.read<AppState>();
+    // Let pushed screens (e.g. the pending-dues popup's "Go to Billing") ask
+    // the shell to switch tabs.
+    _appState.tabRequest.addListener(_onTabRequest);
     // Poll for order status changes so print-ready/collected notifications
     // fire while the app is open, without the user manually refreshing.
     _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
-      context.read<AppState>().refreshOrders();
+      _appState.refreshOrders();
     });
+  }
+
+  void _onTabRequest() {
+    final target = _appState.tabRequest.value;
+    if (target != null && mounted) {
+      _selectTab(target);
+      _appState.tabRequest.value = null; // consume the one-shot request
+    }
   }
 
   @override
   void dispose() {
+    _appState.tabRequest.removeListener(_onTabRequest);
     _pollTimer?.cancel();
     _tabCurve.dispose();
     _tabAnim.dispose();
@@ -157,6 +173,18 @@ class _ProfileTab extends StatelessWidget {
               decoration: AppDecor.card(),
               child: Column(
                 children: [
+                  _menuRow(
+                    context,
+                    icon: Icons.person_outline_rounded,
+                    title: 'Edit Profile',
+                    subtitle: 'Update your name, email and phone',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const EditProfileScreen(),
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 1, indent: 66, color: AppColors.border),
                   _menuRow(
                     context,
                     icon: Icons.sell_outlined,
@@ -391,6 +419,7 @@ class _ProfileTab extends StatelessWidget {
   void _showRatesSheet(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: AppColors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
@@ -406,7 +435,7 @@ class _ProfileTab extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (_) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 26, 24, 26),
           child: Column(
@@ -437,6 +466,22 @@ class _ProfileTab extends StatelessWidget {
                   fontSize: 13,
                   color: AppColors.textSecondary,
                   height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 22),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () {
+                    Navigator.of(sheetContext).pop();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const WalkthroughScreen(replay: true),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.play_circle_outline_rounded, size: 20),
+                  label: const Text('View Demo'),
                 ),
               ),
             ],
@@ -504,65 +549,79 @@ class _RatesSheetContentState extends State<_RatesSheetContent> {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Print Rates',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 16),
-            FutureBuilder<void>(
-              future: _future,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                return Consumer<AppState>(
-                  builder: (context, state, _) {
-                    if (state.pricing.isEmpty) {
-                      return const Text(
-                        'No print rates configured yet.',
-                        style: TextStyle(color: AppColors.textSecondary),
-                      );
-                    }
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (var i = 0; i < state.pricing.length; i++) ...[
-                          if (i > 0) const SizedBox(height: 10),
-                          _rateRow(
-                            (state.pricing[i]['side'] == 'double')
-                                ? Icons.flip_to_back_rounded
-                                : Icons.description_outlined,
-                            _rateLabel(state.pricing[i]),
-                            '₹${state.pricing[i]['price']} / '
-                            '${state.pricing[i]['side'] == 'double' ? 'sheet' : 'page'}',
-                          ),
-                        ],
-                      ],
-                    );
-                  },
-                );
-              },
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Double-sided fits two pages per sheet — cheaper for long '
-              'documents and better for the planet.',
-              style: TextStyle(
-                fontSize: 12.5,
-                color: AppColors.textSecondary,
-                height: 1.5,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Print Rates',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              // The full list scrolls within the capped sheet height, so every
+              // rate is reachable regardless of screen size.
+              Flexible(
+                child: SingleChildScrollView(
+                  child: FutureBuilder<void>(
+                    future: _future,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState != ConnectionState.done) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+                      return Consumer<AppState>(
+                        builder: (context, state, _) {
+                          if (state.pricing.isEmpty) {
+                            return const Text(
+                              'No print rates configured yet.',
+                              style:
+                                  TextStyle(color: AppColors.textSecondary),
+                            );
+                          }
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              for (var i = 0;
+                                  i < state.pricing.length;
+                                  i++) ...[
+                                if (i > 0) const SizedBox(height: 10),
+                                _rateRow(
+                                  (state.pricing[i]['side'] == 'double')
+                                      ? Icons.flip_to_back_rounded
+                                      : Icons.description_outlined,
+                                  _rateLabel(state.pricing[i]),
+                                  '₹${state.pricing[i]['price']} / '
+                                  '${state.pricing[i]['side'] == 'double' ? 'sheet' : 'page'}',
+                                ),
+                              ],
+                            ],
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Double-sided fits two pages per sheet — cheaper for long '
+                'documents and better for the planet.',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: AppColors.textSecondary,
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

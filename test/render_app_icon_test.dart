@@ -20,13 +20,17 @@ Future<void> _render(String path, int size, {required bool maskable}) async {
 }
 
 void main() {
-  test('render launcher icons into web/', () async {
+  test('render launcher icons into web/ and assets/icon/', () async {
     await _render('web/icons/Icon-512.png', 512, maskable: false);
     await _render('web/icons/Icon-192.png', 192, maskable: false);
     await _render('web/icons/Icon-maskable-512.png', 512, maskable: true);
     await _render('web/icons/Icon-maskable-192.png', 192, maskable: true);
     await _render('web/favicon.png', 64, maskable: false);
 
+    // Android launcher icon source (flutter_launcher_icons reads this)
+    await _render('assets/icon/printease_icon.png', 1024, maskable: true);
+
     expect(File('web/favicon.png').lengthSync(), greaterThan(0));
+    expect(File('assets/icon/printease_icon.png').lengthSync(), greaterThan(0));
   });
 }

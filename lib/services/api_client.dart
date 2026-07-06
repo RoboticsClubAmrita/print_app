@@ -80,6 +80,7 @@ class ApiClient {
     required String email,
     required String phone,
     required String password,
+    String? role,
   }) async {
     final res = await http.post(
       _u('/users/add'),
@@ -90,6 +91,7 @@ class ApiClient {
         'email': email,
         'phone': phone,
         'password': password,
+        if (role != null) 'role': role,
       }),
     );
     final data = _unwrap(res) as Map<String, dynamic>;

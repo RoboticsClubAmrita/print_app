@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../services/session_store.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_icon.dart';
@@ -9,6 +10,7 @@ import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
 import 'login_screen.dart';
 import 'shell_screen.dart';
+import 'walkthrough_screen.dart';
 
 /// Dark hero landing screen — branded entry point with the same
 /// dot-grid texture and watermark used across the app.
@@ -24,6 +26,20 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _explore() async {
     setState(() => _checking = true);
+
+    // First-run gate: show the onboarding walkthrough once.
+    final seenWalkthrough = await SessionStore.seenWalkthrough;
+    if (!mounted) return;
+    if (!seenWalkthrough) {
+      setState(() => _checking = false);
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const WalkthroughScreen()),
+      );
+      if (!mounted) return;
+      // After finishing the walkthrough, proceed to session restore.
+      setState(() => _checking = true);
+    }
+
     final restored = await context.read<AppState>().restoreSession();
     if (!mounted) return;
     setState(() => _checking = false);
