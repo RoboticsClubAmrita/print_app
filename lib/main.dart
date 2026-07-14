@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 
-import 'screens/splash_screen.dart';
+import 'screens/login_screen.dart';
 import 'services/notification_service.dart';
 import 'state/app_state.dart';
 import 'theme/app_theme.dart';
@@ -25,7 +25,7 @@ class PrintServiceApp extends StatelessWidget {
         title: 'PrintEase',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
-        home: const SplashScreen(),
+        home: const LoginScreen(),
       ),
     );
   }
