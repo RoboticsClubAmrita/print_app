@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import '../widgets/showcase_next_button.dart';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -20,14 +22,19 @@ import 'order_detail_screen.dart';
 import 'print_preview_screen.dart';
 import 'package:showcaseview/showcaseview.dart';
 import '../services/session_store.dart';
+import '../widgets/showcase_next_button.dart';
 
-/// Home tab: dark hero header + the print order form card,
-/// mirroring the flight booking reference layout.
 class HomeTab extends StatefulWidget {
   final VoidCallback onViewOrders;
   final VoidCallback onViewProfile;
 
-  const HomeTab({super.key, required this.onViewOrders, required this.onViewProfile});
+
+  const HomeTab({
+    super.key,
+    required this.onViewOrders,
+    required this.onViewProfile,
+    
+  });
 
   @override
   State<HomeTab> createState() => HomeTabState();
@@ -60,7 +67,7 @@ class HomeTabState extends State<HomeTab> {
   final _tourLocation = GlobalKey();
   final _tourNotifications = GlobalKey();
   final _tourProfile = GlobalKey();
-  final _tourOrderCard = GlobalKey();
+
   final _tourToggle = GlobalKey();
   final _tourDocument = GlobalKey();
   final _tourPages = GlobalKey();
@@ -103,7 +110,6 @@ class HomeTabState extends State<HomeTab> {
       _tourLocation,
       _tourNotifications,
       _tourProfile,
-      _tourOrderCard,
       _tourToggle,
       _tourDocument,
       _tourPages,
@@ -591,6 +597,8 @@ class HomeTabState extends State<HomeTab> {
                           borderRadius: BorderRadius.all(Radius.circular(24)),
                         ),
                         enableAutoScroll: true,
+                        tooltipActions: nextTooltipActions(context),
+                        tooltipActionConfig: tooltipNextActionConfig,
                         child: Pressable(
                           onTap: _pickLocation,
                           child: Container(
@@ -631,6 +639,8 @@ class HomeTabState extends State<HomeTab> {
                             'Order updates land here — queued, printing, ready, collected.',
                         targetShapeBorder: const CircleBorder(),
                         enableAutoScroll: true,
+                        tooltipActions: nextTooltipActions(context),
+                        tooltipActionConfig: tooltipNextActionConfig,
                         child: Pressable(
                           onTap: _showNotifications,
                           child: Container(
@@ -657,6 +667,8 @@ class HomeTabState extends State<HomeTab> {
                             'View your order history and account details anytime.',
                         targetShapeBorder: const CircleBorder(),
                         enableAutoScroll: true,
+                        tooltipActions: nextTooltipActions(context),
+                        tooltipActionConfig: tooltipNextActionConfig,
                         child: Pressable(
                           onTap: widget.onViewProfile,
                           child: Container(
@@ -729,51 +741,44 @@ class HomeTabState extends State<HomeTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Showcase(
-            key: _tourOrderCard,
-            title: 'New Print Order',
-            description:
-                'Everything you need to set up a print job lives in this card — start to finish.',
-            enableAutoScroll: true,
-            child: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: AppColors.black,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.tune_rounded,
-                      color: AppColors.white, size: 20),
+         Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.black,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'New Print Order',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.2,
-                        ),
+                child: const Icon(Icons.tune_rounded,
+                    color: AppColors.white, size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'New Print Order',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
                       ),
-                      SizedBox(height: 1),
-                      Text(
-                        'Set it up in seconds',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          color: AppColors.textSecondary,
-                        ),
+                    ),
+                    SizedBox(height: 1),
+                    Text(
+                      'Set it up in seconds',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: AppColors.textSecondary,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
           const SizedBox(height: 18),
           Showcase(
@@ -785,6 +790,8 @@ class HomeTabState extends State<HomeTab> {
               borderRadius: BorderRadius.all(Radius.circular(30)),
             ),
             enableAutoScroll: true,
+            tooltipActions: nextTooltipActions(context),
+            tooltipActionConfig: tooltipNextActionConfig,
             child: PillToggle(
               options: const ['Single-sided', 'Double-sided'],
               selectedIndex: _sideIndex,
@@ -804,6 +811,8 @@ class HomeTabState extends State<HomeTab> {
               borderRadius: BorderRadius.all(Radius.circular(22)),
             ),
             enableAutoScroll: true,
+            tooltipActions: nextTooltipActions(context),
+            tooltipActionConfig: tooltipNextActionConfig,
             child: FieldChip(
               label:
                   _fileName == null ? 'Document' : 'Document • $_fileSizeKb KB',
@@ -826,6 +835,8 @@ class HomeTabState extends State<HomeTab> {
                     borderRadius: BorderRadius.all(Radius.circular(22)),
                   ),
                   enableAutoScroll: true,
+                  tooltipActions: nextTooltipActions(context),
+                  tooltipActionConfig: tooltipNextActionConfig,
                   child: FieldChip(
                     label: 'Pages',
                     value: _uploading
@@ -851,6 +862,8 @@ class HomeTabState extends State<HomeTab> {
                     borderRadius: BorderRadius.all(Radius.circular(22)),
                   ),
                   enableAutoScroll: true,
+                  tooltipActions: nextTooltipActions(context),
+                  tooltipActionConfig: tooltipNextActionConfig,
                   child: StepperChip(
                     label: 'Copies',
                     value: _copies,
@@ -885,6 +898,8 @@ class HomeTabState extends State<HomeTab> {
               borderRadius: BorderRadius.all(Radius.circular(22)),
             ),
             enableAutoScroll: true,
+            tooltipActions: nextTooltipActions(context),
+            tooltipActionConfig: tooltipNextActionConfig,
             child: FieldChip(
               label: 'Print Time',
               value: schedLabel,
@@ -898,10 +913,12 @@ class HomeTabState extends State<HomeTab> {
             title: 'Estimated Total',
             description:
                 'Your live cost updates instantly as you adjust pages, copies and sides.',
-            enableAutoScroll: true,
+           enableAutoScroll: true,
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(20)),
             ),
+            tooltipActions: nextTooltipActions(context),
+            tooltipActionConfig: tooltipNextActionConfig,
             child: Container(
               padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
               decoration: BoxDecoration(
@@ -969,13 +986,18 @@ class HomeTabState extends State<HomeTab> {
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(16)),
             ),
+            tooltipActions: nextTooltipActions(context),
+            tooltipActionConfig: tooltipNextActionConfig,
             child: FilledButton(
               onPressed: (_placing || _uploading) ? null : _placeOrder,
               child: _placing
                   ? const SizedBox(
                       width: 20,
                       height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.white,
+                      ),
                     )
                   : const Row(
                       mainAxisAlignment: MainAxisAlignment.center,

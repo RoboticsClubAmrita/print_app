@@ -11,12 +11,15 @@ import '../theme/app_theme.dart';
 import '../widgets/bottom_nav.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
+import '../widgets/showcase_next_button.dart';
 import 'billing_screen.dart';
 import 'edit_profile_screen.dart';
 import 'home_screen.dart';
 import 'login_screen.dart';
 import 'orders_screen.dart';
 import 'walkthrough_screen.dart';
+
+
 
 /// Hosts the four tabs behind the floating black pill navigation.
 class ShellScreen extends StatefulWidget {
@@ -30,7 +33,7 @@ class _ShellScreenState extends State<ShellScreen>
     with SingleTickerProviderStateMixin {
   int _index = 0;
   final _homeKey = GlobalKey<HomeTabState>();
-  final _ordersKey = GlobalKey();
+  final _ordersKey = GlobalKey<OrdersTabState>();
   final _billingKey = GlobalKey<BillingTabState>();
   final _profileKey = GlobalKey<ProfileTabState>();
   late final AnimationController _tabAnim = AnimationController(
@@ -58,6 +61,14 @@ class _ShellScreenState extends State<ShellScreen>
     _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       _appState.refreshOrders();
     });
+    // Chain tab tours: when the tab currently on screen finishes its tour
+    // (last "Next" tapped), automatically switch to the next tab and start
+    // its tour.
+    TourCoordinator.onFinish = _onTourFinish;
+  }
+
+  void _onTourFinish() {
+    if (_index < 3) _selectTab(_index + 1);
   }
 
   void _onStateChange() {
@@ -87,28 +98,42 @@ class _ShellScreenState extends State<ShellScreen>
     _pollTimer?.cancel();
     _tabCurve.dispose();
     _tabAnim.dispose();
+    if (TourCoordinator.onFinish == _onTourFinish) {
+      TourCoordinator.onFinish = null;
+    }
     super.dispose();
   }
 
+  // Changes the selected tab and automatically starts
+// the tour for that page if required.
   void _selectTab(int i) {
     if (i == _index) return;
+
     setState(() => _index = i);
+
     _tabAnim.forward(from: 0);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeTourFor(i));
+
+    _maybeTourFor(i);
   }
 
+  // Starts the showcase for the selected tab.
+  // We can later call this from any screen to continue the tour.
   void _maybeTourFor(int i) {
-    switch (i) {
-      case 1:
-        (_ordersKey.currentState as dynamic)?.maybeStartTour();
-        break;
-      case 2:
-        _billingKey.currentState?.maybeStartTour();
-        break;
-      case 3:
-        _profileKey.currentState?.maybeStartTour();
-        break;
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      switch (i) {
+        case 1:
+          _ordersKey.currentState?.maybeStartTour();
+          break;
+
+        case 2:
+          _billingKey.currentState?.maybeStartTour();
+          break;
+
+        case 3:
+          _profileKey.currentState?.maybeStartTour();
+          break;
+      }
+    });
   }
 
   @override
@@ -128,10 +153,10 @@ class _ShellScreenState extends State<ShellScreen>
               index: _index,
               children: [
                 HomeTab(
-                  key: _homeKey,
-                  onViewOrders: () => _selectTab(1),
-                  onViewProfile: () => _selectTab(3),
-                ),
+  key: _homeKey,
+  onViewOrders: () => _selectTab(1),
+  onViewProfile: () => _selectTab(3),
+),
                 OrdersTab(key: _ordersKey),
                 BillingTab(key: _billingKey),
                 ProfileTab(key: _profileKey),
@@ -160,7 +185,6 @@ class ProfileTab extends StatefulWidget {
 class ProfileTabState extends State<ProfileTab> {
   bool _tourStarted = false;
   final _tourIdentity = GlobalKey();
-  final _tourAccount = GlobalKey();
 
   // Every showcase step scrolls the page to bring its target into view
   // before highlighting it, so a step lower down the page is always
@@ -177,7 +201,6 @@ class ProfileTabState extends State<ProfileTab> {
     _tourStarted = true;
     ShowCaseWidget.of(context).startShowCase([
       _tourIdentity,
-      _tourAccount,
     ]);
     await SessionStore.markTourSeen('profile');
   }
@@ -212,6 +235,8 @@ class ProfileTabState extends State<ProfileTab> {
                 borderRadius: BorderRadius.all(Radius.circular(28)),
               ),
               enableAutoScroll: true,
+              tooltipActions: nextTooltipActions(context),
+              tooltipActionConfig: tooltipNextActionConfig,
               child: _identityCard(user?.initials ?? '?', user?.name ?? 'Guest',
                   user?.email ?? ''),
             ),
@@ -235,16 +260,9 @@ class ProfileTabState extends State<ProfileTab> {
           const SizedBox(height: 26),
           FadeSlideIn(
             delay: const Duration(milliseconds: 200),
-            child: Showcase(
-              key: _tourAccount,
-              title: 'Account Settings',
-              description:
-                  'Edit your details, check print rates, or learn about PrintEase.',
-              enableAutoScroll: true,
-              child: const Text(
-                'Account',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-              ),
+            child: const Text(
+              'Account',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
             ),
           ),
           const SizedBox(height: 12),

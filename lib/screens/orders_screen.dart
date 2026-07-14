@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:showcaseview/showcaseview.dart';
 
 import '../data/pricing.dart';
 import '../models/print_order.dart';
+import '../services/session_store.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fx.dart';
 import '../widgets/pill_toggle.dart';
+import '../widgets/showcase_next_button.dart';
 import '../widgets/status_chip.dart';
 import '../widgets/ticket_card.dart';
 import 'order_detail_screen.dart';
@@ -18,11 +21,29 @@ class OrdersTab extends StatefulWidget {
   const OrdersTab({super.key});
 
   @override
-  State<OrdersTab> createState() => _OrdersTabState();
+  State<OrdersTab> createState() => OrdersTabState();
 }
 
-class _OrdersTabState extends State<OrdersTab> {
+class OrdersTabState extends State<OrdersTab> {
   int _filter = 0;
+  bool _tourStarted = false;
+  final _tourToggle = GlobalKey();
+  final _tourList = GlobalKey();
+
+  /// True once the first-run coach-mark tour of the Orders tab has been
+  /// shown. Triggered by [ShellScreen] right after this tab is first
+  /// selected — never re-shown afterwards, even across logouts.
+  Future<void> maybeStartTour() async {
+    if (_tourStarted || !mounted) return;
+    final seen = await SessionStore.seenTour('orders');
+    if (seen || !mounted) return;
+    _tourStarted = true;
+    ShowCaseWidget.of(context).startShowCase([
+      _tourToggle,
+      _tourList,
+    ]);
+    await SessionStore.markTourSeen('orders');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -51,37 +72,59 @@ class _OrdersTabState extends State<OrdersTab> {
               style: const TextStyle(color: Colors.white54, fontSize: 13),
             ),
             const SizedBox(height: 18),
-            PillToggle(
-              options: const ['Active', 'History'],
-              selectedIndex: _filter,
-              onChanged: (i) => setState(() => _filter = i),
-              onDark: true,
+            Showcase(
+              key: _tourToggle,
+              title: 'Active vs History',
+              description:
+                  'Switch between orders in progress and past collected prints.',
+              targetShapeBorder: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(30)),
+              ),
+              enableAutoScroll: true,
+              tooltipActions: nextTooltipActions(context),
+              tooltipActionConfig: tooltipNextActionConfig,
+              child: PillToggle(
+                options: const ['Active', 'History'],
+                selectedIndex: _filter,
+                onChanged: (i) => setState(() => _filter = i),
+                onDark: true,
+              ),
             ),
             const SizedBox(height: 18),
             Expanded(
-              child: RefreshIndicator(
-                onRefresh: () => context.read<AppState>().refreshOrders(),
-                child: orders.isEmpty
-                    ? ListView(
-                        key: ValueKey('empty-$_filter'),
-                        children: [
-                          const SizedBox(height: 60),
-                          FadeSlideIn(
-                            from: const Offset(0, 0.04),
-                            child: _emptyState(),
+              child: Showcase(
+                key: _tourList,
+                title: 'Your Orders',
+                description:
+                    'Tap any order to see its live status and full details.',
+                enableAutoScroll: true,
+                tooltipActions: nextTooltipActions(context),
+                tooltipActionConfig: tooltipNextActionConfig,
+                child: RefreshIndicator(
+                  onRefresh: () => context.read<AppState>().refreshOrders(),
+                  child: orders.isEmpty
+                      ? ListView(
+                          key: ValueKey('empty-$_filter'),
+                          children: [
+                            const SizedBox(height: 60),
+                            FadeSlideIn(
+                              from: const Offset(0, 0.04),
+                              child: _emptyState(),
+                            ),
+                          ],
+                        )
+                      : ListView.separated(
+                          key: ValueKey('list-$_filter'),
+                          padding: const EdgeInsets.only(bottom: 120),
+                          itemCount: orders.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 14),
+                          itemBuilder: (context, i) => FadeSlideIn(
+                            delay: Duration(milliseconds: 50 * (i < 6 ? i : 6)),
+                            child: _orderTicket(context, orders[i]),
                           ),
-                        ],
-                      )
-                    : ListView.separated(
-                        key: ValueKey('list-$_filter'),
-                        padding: const EdgeInsets.only(bottom: 120),
-                        itemCount: orders.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 14),
-                        itemBuilder: (context, i) => FadeSlideIn(
-                          delay: Duration(milliseconds: 50 * (i < 6 ? i : 6)),
-                          child: _orderTicket(context, orders[i]),
                         ),
-                      ),
+                ),
               ),
             ),
           ],

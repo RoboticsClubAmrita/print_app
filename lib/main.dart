@@ -7,6 +7,7 @@ import 'screens/login_screen.dart';
 import 'services/notification_service.dart';
 import 'state/app_state.dart';
 import 'theme/app_theme.dart';
+import 'widgets/showcase_next_button.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +24,8 @@ class PrintServiceApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => AppState(),
       child: ShowCaseWidget(
+        disableBarrierInteraction: true,
+        onFinish: () => TourCoordinator.onFinish?.call(),
         builder: (context) => MaterialApp(
           title: 'PrintEase',
           debugShowCheckedModeBanner: false,

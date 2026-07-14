@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../widgets/showcase_next_button.dart';
+
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:showcaseview/showcaseview.dart';
@@ -12,6 +15,7 @@ import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
+import '../widgets/showcase_next_button.dart';
 
 /// Billing tab: dark statement card with an oversized total-due numeral,
 /// order-wise cost breakdown and payment history.
@@ -28,7 +32,7 @@ class BillingTabState extends State<BillingTab> {
   bool _breakdownExpanded = false;
   bool _tourStarted = false;
   final _tourStatement = GlobalKey();
-  final _tourHistory = GlobalKey();
+  
 
   // Every showcase step scrolls the page to bring its target into view
   // before highlighting it, so a step lower down the page is always
@@ -45,7 +49,6 @@ class BillingTabState extends State<BillingTab> {
     _tourStarted = true;
     ShowCaseWidget.of(context).startShowCase([
       _tourStatement,
-      _tourHistory,
     ]);
     await SessionStore.markTourSeen('billing');
   }
@@ -163,6 +166,8 @@ class BillingTabState extends State<BillingTab> {
                 borderRadius: BorderRadius.all(Radius.circular(28)),
               ),
               enableAutoScroll: true,
+              tooltipActions: nextTooltipActions(context),
+              tooltipActionConfig: tooltipNextActionConfig,
               child: _statementCard(context, state, unpaid.length),
             ),
           ),
@@ -232,15 +237,9 @@ class BillingTabState extends State<BillingTab> {
           const SizedBox(height: 14),
           FadeSlideIn(
             delay: const Duration(milliseconds: 240),
-            child: Showcase(
-              key: _tourHistory,
-              title: 'Payment History',
-              description: 'Every past payment is logged here for your records.',
-              enableAutoScroll: true,
-              child: const Text(
-                'Payment History',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-              ),
+            child: const Text(
+              'Payment History',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
             ),
           ),
           const SizedBox(height: 12),
