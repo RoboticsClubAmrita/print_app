@@ -1,3 +1,4 @@
+import 'package:showcaseview/showcaseview.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
@@ -21,11 +22,13 @@ class PrintServiceApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
       create: (_) => AppState(),
-      child: MaterialApp(
-        title: 'PrintEase',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light,
-        home: const LoginScreen(),
+      child: ShowCaseWidget(
+        builder: (context) => MaterialApp(
+          title: 'PrintEase',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light,
+          home: const LoginScreen(),
+        ),
       ),
     );
   }

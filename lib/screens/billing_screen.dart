@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:showcaseview/showcaseview.dart';
 
 import '../data/pricing.dart';
 import '../models/print_order.dart';
 import '../services/api_client.dart';
 import '../services/razorpay_service.dart';
+import '../services/session_store.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dot_grid.dart';
@@ -17,13 +19,36 @@ class BillingTab extends StatefulWidget {
   const BillingTab({super.key});
 
   @override
-  State<BillingTab> createState() => _BillingTabState();
+  State<BillingTab> createState() => BillingTabState();
 }
 
-class _BillingTabState extends State<BillingTab> {
+class BillingTabState extends State<BillingTab> {
   bool _paying = false;
   bool _payingDues = false;
   bool _breakdownExpanded = false;
+  bool _tourStarted = false;
+  final _tourStatement = GlobalKey();
+  final _tourHistory = GlobalKey();
+
+  // Every showcase step scrolls the page to bring its target into view
+  // before highlighting it, so a step lower down the page is always
+  // reachable regardless of scroll position when the tour starts.
+  static const _tourScrollDuration = Duration(milliseconds: 300);
+
+  /// True once the first-run coach-mark tour of the Billing tab has been
+  /// shown. Triggered by [ShellScreen] right after this tab is first
+  /// selected — never re-shown afterwards, even across logouts.
+  Future<void> maybeStartTour() async {
+    if (_tourStarted || !mounted) return;
+    final seen = await SessionStore.seenTour('billing');
+    if (seen || !mounted) return;
+    _tourStarted = true;
+    ShowCaseWidget.of(context).startShowCase([
+      _tourStatement,
+      _tourHistory,
+    ]);
+    await SessionStore.markTourSeen('billing');
+  }
 
   @override
   void initState() {
@@ -129,7 +154,17 @@ class _BillingTabState extends State<BillingTab> {
           const SizedBox(height: 20),
           FadeSlideIn(
             delay: const Duration(milliseconds: 90),
-            child: _statementCard(context, state, unpaid.length),
+            child: Showcase(
+              key: _tourStatement,
+              title: 'Your Balance',
+              description:
+                  'See what you owe at a glance, and pay directly from here.',
+              targetShapeBorder: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(28)),
+              ),
+              enableAutoScroll: true,
+              child: _statementCard(context, state, unpaid.length),
+            ),
           ),
           if (state.outstandingDues > 0) ...[
             const SizedBox(height: 16),
@@ -195,11 +230,17 @@ class _BillingTabState extends State<BillingTab> {
             ),
           ],
           const SizedBox(height: 14),
-          const FadeSlideIn(
-            delay: Duration(milliseconds: 240),
-            child: Text(
-              'Payment History',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          FadeSlideIn(
+            delay: const Duration(milliseconds: 240),
+            child: Showcase(
+              key: _tourHistory,
+              title: 'Payment History',
+              description: 'Every past payment is logged here for your records.',
+              enableAutoScroll: true,
+              child: const Text(
+                'Payment History',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
             ),
           ),
           const SizedBox(height: 12),

@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:showcaseview/showcaseview.dart';
 
 import '../data/pricing.dart';
+import '../services/session_store.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/bottom_nav.dart';
@@ -27,6 +29,10 @@ class ShellScreen extends StatefulWidget {
 class _ShellScreenState extends State<ShellScreen>
     with SingleTickerProviderStateMixin {
   int _index = 0;
+  final _homeKey = GlobalKey<HomeTabState>();
+  final _ordersKey = GlobalKey();
+  final _billingKey = GlobalKey<BillingTabState>();
+  final _profileKey = GlobalKey<ProfileTabState>();
   late final AnimationController _tabAnim = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 280),
@@ -88,6 +94,21 @@ class _ShellScreenState extends State<ShellScreen>
     if (i == _index) return;
     setState(() => _index = i);
     _tabAnim.forward(from: 0);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeTourFor(i));
+  }
+
+  void _maybeTourFor(int i) {
+    switch (i) {
+      case 1:
+        (_ordersKey.currentState as dynamic)?.maybeStartTour();
+        break;
+      case 2:
+        _billingKey.currentState?.maybeStartTour();
+        break;
+      case 3:
+        _profileKey.currentState?.maybeStartTour();
+        break;
+    }
   }
 
   @override
@@ -107,12 +128,13 @@ class _ShellScreenState extends State<ShellScreen>
               index: _index,
               children: [
                 HomeTab(
+                  key: _homeKey,
                   onViewOrders: () => _selectTab(1),
                   onViewProfile: () => _selectTab(3),
                 ),
-                const OrdersTab(),
-                const BillingTab(),
-                const _ProfileTab(),
+                OrdersTab(key: _ordersKey),
+                BillingTab(key: _billingKey),
+                ProfileTab(key: _profileKey),
               ],
             ),
           ),
@@ -128,8 +150,37 @@ class _ShellScreenState extends State<ShellScreen>
   }
 }
 
-class _ProfileTab extends StatelessWidget {
-  const _ProfileTab();
+class ProfileTab extends StatefulWidget {
+  const ProfileTab({super.key});
+
+  @override
+  State<ProfileTab> createState() => ProfileTabState();
+}
+
+class ProfileTabState extends State<ProfileTab> {
+  bool _tourStarted = false;
+  final _tourIdentity = GlobalKey();
+  final _tourAccount = GlobalKey();
+
+  // Every showcase step scrolls the page to bring its target into view
+  // before highlighting it, so a step lower down the page is always
+  // reachable regardless of scroll position when the tour starts.
+  static const _tourScrollDuration = Duration(milliseconds: 300);
+
+  /// True once the first-run coach-mark tour of the Profile tab has been
+  /// shown. Triggered by [ShellScreen] right after this tab is first
+  /// selected — never re-shown afterwards, even across logouts.
+  Future<void> maybeStartTour() async {
+    if (_tourStarted || !mounted) return;
+    final seen = await SessionStore.seenTour('profile');
+    if (seen || !mounted) return;
+    _tourStarted = true;
+    ShowCaseWidget.of(context).startShowCase([
+      _tourIdentity,
+      _tourAccount,
+    ]);
+    await SessionStore.markTourSeen('profile');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -153,8 +204,17 @@ class _ProfileTab extends StatelessWidget {
           const SizedBox(height: 18),
           FadeSlideIn(
             delay: const Duration(milliseconds: 60),
-            child: _identityCard(user?.initials ?? '?', user?.name ?? 'Guest',
-                user?.email ?? ''),
+            child: Showcase(
+              key: _tourIdentity,
+              title: 'Your Profile',
+              description: 'Your name, email and member status live here.',
+              targetShapeBorder: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(28)),
+              ),
+              enableAutoScroll: true,
+              child: _identityCard(user?.initials ?? '?', user?.name ?? 'Guest',
+                  user?.email ?? ''),
+            ),
           ),
           const SizedBox(height: 14),
           FadeSlideIn(
@@ -173,11 +233,18 @@ class _ProfileTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 26),
-          const FadeSlideIn(
-            delay: Duration(milliseconds: 200),
-            child: Text(
-              'Account',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          FadeSlideIn(
+            delay: const Duration(milliseconds: 200),
+            child: Showcase(
+              key: _tourAccount,
+              title: 'Account Settings',
+              description:
+                  'Edit your details, check print rates, or learn about PrintEase.',
+              enableAutoScroll: true,
+              child: const Text(
+                'Account',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
             ),
           ),
           const SizedBox(height: 12),

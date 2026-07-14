@@ -18,6 +18,8 @@ import '../widgets/upload_progress.dart';
 import '../widgets/pill_toggle.dart';
 import 'order_detail_screen.dart';
 import 'print_preview_screen.dart';
+import 'package:showcaseview/showcaseview.dart';
+import '../services/session_store.dart';
 
 /// Home tab: dark hero header + the print order form card,
 /// mirroring the flight booking reference layout.
@@ -28,14 +30,14 @@ class HomeTab extends StatefulWidget {
   const HomeTab({super.key, required this.onViewOrders, required this.onViewProfile});
 
   @override
-  State<HomeTab> createState() => _HomeTabState();
+  State<HomeTab> createState() => HomeTabState();
 }
 
 /// Extensions the backend's upload filter accepts (see
 /// print_backend/utils/uploadHelper.js) — PDFs, Word docs, and images.
 const _kPrintableExtensions = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'];
 
-class _HomeTabState extends State<HomeTab> {
+class HomeTabState extends State<HomeTab> {
   String? _fileName;
   Uint8List? _fileBytes;
   int _fileSizeKb = 0;
@@ -53,6 +55,25 @@ class _HomeTabState extends State<HomeTab> {
   /// only size/color this form offers) — replaces the flat local
   /// estimate so the shown price always matches what's actually billed.
   num? _ratePerPage;
+
+  // ---------------- First-time feature tour ----------------
+  final _tourLocation = GlobalKey();
+  final _tourNotifications = GlobalKey();
+  final _tourProfile = GlobalKey();
+  final _tourOrderCard = GlobalKey();
+  final _tourToggle = GlobalKey();
+  final _tourDocument = GlobalKey();
+  final _tourPages = GlobalKey();
+  final _tourCopies = GlobalKey();
+  final _tourPrintTime = GlobalKey();
+  final _tourTotal = GlobalKey();
+  final _tourPlaceOrder = GlobalKey();
+
+  // Every showcase step scrolls the page to bring its target into view
+  // before highlighting it, so steps further down (Estimated Total, Place
+  // Order, etc.) are always reachable regardless of scroll position when
+  // the tour starts.
+  static const _tourScrollDuration = Duration(milliseconds: 300);
 
   PrintSide get _side => _sideIndex == 0 ? PrintSide.single : PrintSide.double;
 
@@ -73,6 +94,25 @@ class _HomeTabState extends State<HomeTab> {
     } catch (_) {
       // Non-critical — falls back to the local flat-rate estimate.
     }
+  }
+
+  Future<void> _maybeStartTour() async {
+    final alreadySeen = await SessionStore.seenTour('home');
+    if (alreadySeen || !mounted) return;
+    ShowCaseWidget.of(context).startShowCase([
+      _tourLocation,
+      _tourNotifications,
+      _tourProfile,
+      _tourOrderCard,
+      _tourToggle,
+      _tourDocument,
+      _tourPages,
+      _tourCopies,
+      _tourPrintTime,
+      _tourTotal,
+      _tourPlaceOrder,
+    ]);
+    await SessionStore.markTourSeen('home');
   }
 
   Future<void> _pickPageRange() async {
@@ -135,6 +175,7 @@ class _HomeTabState extends State<HomeTab> {
     final state = context.read<AppState>();
     if (state.locations.isEmpty) state.loadLocations();
     _loadRate();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeStartTour());
   }
 
   Future<void> _pickLocation() async {
@@ -541,73 +582,99 @@ class _HomeTabState extends State<HomeTab> {
                 children: [
                   Row(
                     children: [
-                      Pressable(
-                        onTap: _pickLocation,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 9),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.10),
-                            borderRadius: BorderRadius.circular(24),
-                            border: Border.all(color: Colors.white12, width: 1),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.location_on_rounded,
-                                  color: AppColors.white, size: 15),
-                              const SizedBox(width: 6),
-                              Text(
-                                context.watch<AppState>().selectedLocationName ??
-                                    'Choose Location',
-                                style: const TextStyle(
-                                  color: AppColors.white,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
+                      Showcase(
+                        key: _tourLocation,
+                        title: 'Choose Your Location',
+                        description:
+                            'Tap here to pick which print stack should receive your order.',
+                        targetShapeBorder: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.all(Radius.circular(24)),
+                        ),
+                        enableAutoScroll: true,
+                        child: Pressable(
+                          onTap: _pickLocation,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 9),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(color: Colors.white12, width: 1),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.location_on_rounded,
+                                    color: AppColors.white, size: 15),
+                                const SizedBox(width: 6),
+                                Text(
+                                  context.watch<AppState>().selectedLocationName ??
+                                      'Choose Location',
+                                  style: const TextStyle(
+                                    color: AppColors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 4),
-                              const Icon(Icons.keyboard_arrow_down_rounded,
-                                  color: Colors.white54, size: 16),
-                            ],
+                                const SizedBox(width: 4),
+                                const Icon(Icons.keyboard_arrow_down_rounded,
+                                    color: Colors.white54, size: 16),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                       const Spacer(),
-                      Pressable(
-                        onTap: _showNotifications,
-                        child: Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.08),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white24, width: 1.5),
-                          ),
-                          child: const Icon(
-                            Icons.notifications_none_rounded,
-                            color: AppColors.white,
-                            size: 22,
+                      Showcase(
+                        key: _tourNotifications,
+                        title: 'Stay in the Loop',
+                        description:
+                            'Order updates land here — queued, printing, ready, collected.',
+                        targetShapeBorder: const CircleBorder(),
+                        enableAutoScroll: true,
+                        child: Pressable(
+                          onTap: _showNotifications,
+                          child: Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white24, width: 1.5),
+                            ),
+                            child: const Icon(
+                              Icons.notifications_none_rounded,
+                              color: AppColors.white,
+                              size: 22,
+                            ),
                           ),
                         ),
                       ),
                       const SizedBox(width: 10),
-                      Pressable(
-                        onTap: widget.onViewProfile,
-                        child: Container(
-                          padding: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white24, width: 1.5),
-                          ),
-                          child: CircleAvatar(
-                            radius: 20,
-                            backgroundColor: AppColors.white,
-                            child: Text(
-                              context.watch<AppState>().user?.initials ?? '?',
-                              style: const TextStyle(
-                                color: AppColors.black,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 15,
+                      Showcase(
+                        key: _tourProfile,
+                        title: 'Your Profile',
+                        description:
+                            'View your order history and account details anytime.',
+                        targetShapeBorder: const CircleBorder(),
+                        enableAutoScroll: true,
+                        child: Pressable(
+                          onTap: widget.onViewProfile,
+                          child: Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white24, width: 1.5),
+                            ),
+                            child: CircleAvatar(
+                              radius: 20,
+                              backgroundColor: AppColors.white,
+                              child: Text(
+                                context.watch<AppState>().user?.initials ?? '?',
+                                style: const TextStyle(
+                                  color: AppColors.black,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 15,
+                                ),
                               ),
                             ),
                           ),
@@ -662,87 +729,133 @@ class _HomeTabState extends State<HomeTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppColors.black,
-                  borderRadius: BorderRadius.circular(12),
+          Showcase(
+            key: _tourOrderCard,
+            title: 'New Print Order',
+            description:
+                'Everything you need to set up a print job lives in this card — start to finish.',
+            enableAutoScroll: true,
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppColors.black,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.tune_rounded,
+                      color: AppColors.white, size: 20),
                 ),
-                child: const Icon(Icons.tune_rounded,
-                    color: AppColors.white, size: 20),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'New Print Order',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'New Print Order',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                        ),
                       ),
-                    ),
-                    SizedBox(height: 1),
-                    Text(
-                      'Set it up in seconds',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: AppColors.textSecondary,
+                      SizedBox(height: 1),
+                      Text(
+                        'Set it up in seconds',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: AppColors.textSecondary,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
           const SizedBox(height: 18),
-          PillToggle(
-            options: const ['Single-sided', 'Double-sided'],
-            selectedIndex: _sideIndex,
-            onChanged: (i) {
-              setState(() => _sideIndex = i);
-              _loadRate();
-            },
+          Showcase(
+            key: _tourToggle,
+            title: 'Single or Double-Sided',
+            description:
+                'Double-sided fits two pages per sheet — cheaper and greener for long documents.',
+            targetShapeBorder: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(30)),
+            ),
+            enableAutoScroll: true,
+            child: PillToggle(
+              options: const ['Single-sided', 'Double-sided'],
+              selectedIndex: _sideIndex,
+              onChanged: (i) {
+                setState(() => _sideIndex = i);
+                _loadRate();
+              },
+            ),
           ),
           const SizedBox(height: 14),
-          FieldChip(
-            label:
-                _fileName == null ? 'Document' : 'Document • $_fileSizeKb KB',
-            value: _fileName ?? 'Tap to upload a file',
-            valueIsPlaceholder: _fileName == null,
-            trailingIcon: Icons.upload_file_rounded,
-            onTap: _pickFile,
+          Showcase(
+            key: _tourDocument,
+            title: 'Upload Your Document',
+            description:
+                'Pick any PDF, Word doc or image — we detect the page count instantly.',
+            targetShapeBorder: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(22)),
+            ),
+            enableAutoScroll: true,
+            child: FieldChip(
+              label:
+                  _fileName == null ? 'Document' : 'Document • $_fileSizeKb KB',
+              value: _fileName ?? 'Tap to upload a file',
+              valueIsPlaceholder: _fileName == null,
+              trailingIcon: Icons.upload_file_rounded,
+              onTap: _pickFile,
+            ),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                child: FieldChip(
-                  label: 'Pages',
-                  value: _uploading
-                      ? 'Counting…'
-                      : _detectedPages == null
-                          ? '—'
-                          : _selectedPages == null
-                              ? 'All ($_detectedPages)'
-                              : '${_selectedPages!.length} of $_detectedPages',
-                  valueIsPlaceholder: _detectedPages == null,
-                  trailingIcon: Icons.edit_note_rounded,
-                  onTap: _detectedPages == null ? null : _pickPageRange,
+                child: Showcase(
+                  key: _tourPages,
+                  title: 'Pick Specific Pages',
+                  description:
+                      'Print every page, or tap in to choose a custom range like 1-5, 8.',
+                  targetShapeBorder: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(22)),
+                  ),
+                  enableAutoScroll: true,
+                  child: FieldChip(
+                    label: 'Pages',
+                    value: _uploading
+                        ? 'Counting…'
+                        : _detectedPages == null
+                            ? '—'
+                            : _selectedPages == null
+                                ? 'All ($_detectedPages)'
+                                : '${_selectedPages!.length} of $_detectedPages',
+                    valueIsPlaceholder: _detectedPages == null,
+                    trailingIcon: Icons.edit_note_rounded,
+                    onTap: _detectedPages == null ? null : _pickPageRange,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: StepperChip(
-                  label: 'Copies',
-                  value: _copies,
-                  onChanged: (v) => setState(() => _copies = v),
+                child: Showcase(
+                  key: _tourCopies,
+                  title: 'Set Your Copies',
+                  description: 'Use + and – to change how many copies you need.',
+                  targetShapeBorder: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(22)),
+                  ),
+                  enableAutoScroll: true,
+                  child: StepperChip(
+                    label: 'Copies',
+                    value: _copies,
+                    onChanged: (v) => setState(() => _copies = v),
+                  ),
                 ),
               ),
             ],
@@ -763,86 +876,116 @@ class _HomeTabState extends State<HomeTab> {
             ),
           ],
           const SizedBox(height: 12),
-          FieldChip(
-            label: 'Print Time',
-            value: schedLabel,
-            trailingIcon: Icons.schedule_rounded,
-            onTap: _pickSchedule,
+          Showcase(
+            key: _tourPrintTime,
+            title: 'Choose When to Print',
+            description:
+                'Print right now, or schedule your order for a later time.',
+            targetShapeBorder: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(22)),
+            ),
+            enableAutoScroll: true,
+            child: FieldChip(
+              label: 'Print Time',
+              value: schedLabel,
+              trailingIcon: Icons.schedule_rounded,
+              onTap: _pickSchedule,
+            ),
           ),
           const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
-            decoration: BoxDecoration(
-              color: AppColors.chip,
-              borderRadius: BorderRadius.circular(20),
+          Showcase(
+            key: _tourTotal,
+            title: 'Estimated Total',
+            description:
+                'Your live cost updates instantly as you adjust pages, copies and sides.',
+            enableAutoScroll: true,
+            targetShapeBorder: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(20)),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Estimated Total',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w600,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+              decoration: BoxDecoration(
+                color: AppColors.chip,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Estimated Total',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 3),
-                      AnimatedCount(
-                        value: _estimate,
-                        format: rupees,
-                        style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.5,
-                          color: AppColors.black,
-                          fontFamily: kFontFamily,
+                        const SizedBox(height: 3),
+                        AnimatedCount(
+                          value: _estimate,
+                          format: rupees,
+                          style: const TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.5,
+                            color: AppColors.black,
+                            fontFamily: kFontFamily,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: AppColors.white,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Text(
-                    _ratePerPage != null
-                        ? '₹$_ratePerPage / page'
-                        : rateLabel(_side),
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.black,
+                      ],
                     ),
                   ),
-                ),
-              ],
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.white,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      _ratePerPage != null
+                          ? '₹$_ratePerPage / page'
+                          : rateLabel(_side),
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.black,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 14),
-          FilledButton(
-            onPressed: (_placing || _uploading) ? null : _placeOrder,
-            child: _placing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
-                  )
-                : const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text('Place Print Order'),
-                      SizedBox(width: 8),
-                      Icon(Icons.arrow_forward_rounded, size: 20),
-                    ],
-                  ),
+          Showcase(
+            key: _tourPlaceOrder,
+            title: 'Place Your Order',
+            description:
+                "When you're ready, tap here to review and confirm your print job.",
+            enableAutoScroll: true,
+            targetShapeBorder: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(16)),
+            ),
+            child: FilledButton(
+              onPressed: (_placing || _uploading) ? null : _placeOrder,
+              child: _placing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                    )
+                  : const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text('Place Print Order'),
+                        SizedBox(width: 8),
+                        Icon(Icons.arrow_forward_rounded, size: 20),
+                      ],
+                    ),
+            ),
           ),
         ],
       ),
