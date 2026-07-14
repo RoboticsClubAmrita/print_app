@@ -266,8 +266,7 @@ class _HomeTabState extends State<HomeTab> {
     try {
       final result = await FilePicker.platform.pickFiles(
         withData: true,
-        type: FileType.custom,
-        allowedExtensions: _kPrintableExtensions,
+        type: FileType.any,
       );
       if (result != null && result.files.isNotEmpty && mounted) {
         final f = result.files.first;
