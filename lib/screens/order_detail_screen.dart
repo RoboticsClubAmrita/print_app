@@ -233,7 +233,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   const SizedBox(height: 16),
                   FadeSlideIn(
                     delay: const Duration(milliseconds: 70),
-                    child: Showcase(
+                    child: AppShowcase(
                       key: _tourTimeline,
                       title: 'Track Your Order',
                       description:
@@ -242,7 +242,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                         borderRadius: BorderRadius.all(Radius.circular(26)),
                       ),
                       enableAutoScroll: true,
-                      tooltipActions: nextTooltipActions(context),
+                      tooltipActions: nextTooltipActions(context, step: 1, total: 3),
                       tooltipActionConfig: tooltipNextActionConfig,
                       child: _timelineCard(order),
                     ),
@@ -259,7 +259,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                         borderRadius: BorderRadius.all(Radius.circular(26)),
                       ),
                       enableAutoScroll: true,
-                      tooltipActions: nextTooltipActions(context),
+                      tooltipActions: nextTooltipActions(context, step: 2, total: 3),
                       tooltipActionConfig: tooltipNextActionConfig,
                       child: _costCard(order),
                     ),
@@ -267,13 +267,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   const SizedBox(height: 20),
                   FadeSlideIn(
                     delay: const Duration(milliseconds: 210),
-                    child: Showcase(
+                    child: AppShowcase(
                       key: _tourActions,
                       title: 'Take Action',
                       description:
                           'Pay, cancel, or request collection right from here.',
                       enableAutoScroll: true,
-                      tooltipActions: nextTooltipActions(context),
+                      tooltipActions: nextTooltipActions(context, step: 3, total: 3),
                       tooltipActionConfig: tooltipNextActionConfig,
                       child: _actions(context, order),
                     ),

@@ -1,7 +1,5 @@
 import 'dart:typed_data';
 
-import '../widgets/showcase_next_button.dart';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -16,24 +14,21 @@ import '../utils/page_range.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/field_chip.dart';
 import '../widgets/fx.dart';
-import '../widgets/upload_progress.dart';
 import '../widgets/pill_toggle.dart';
 import 'order_detail_screen.dart';
 import 'print_preview_screen.dart';
-import 'package:showcaseview/showcaseview.dart';
-import '../services/session_store.dart';
 import '../widgets/showcase_next_button.dart';
 
 class HomeTab extends StatefulWidget {
   final VoidCallback onViewOrders;
   final VoidCallback onViewProfile;
-
+  final GlobalKey bottomNavKey;
 
   const HomeTab({
     super.key,
     required this.onViewOrders,
     required this.onViewProfile,
-    
+    required this.bottomNavKey,
   });
 
   @override
@@ -75,6 +70,7 @@ class HomeTabState extends State<HomeTab> {
   final _tourPrintTime = GlobalKey();
   final _tourTotal = GlobalKey();
   final _tourPlaceOrder = GlobalKey();
+  final _tourTodaysPrints = GlobalKey();
 
   // Every showcase step scrolls the page to bring its target into view
   // before highlighting it, so steps further down (Estimated Total, Place
@@ -103,23 +99,22 @@ class HomeTabState extends State<HomeTab> {
     }
   }
 
-  Future<void> _maybeStartTour() async {
-    final alreadySeen = await SessionStore.seenTour('home');
-    if (alreadySeen || !mounted) return;
-    ShowCaseWidget.of(context).startShowCase([
-      _tourLocation,
-      _tourNotifications,
-      _tourProfile,
-      _tourToggle,
-      _tourDocument,
-      _tourPages,
-      _tourCopies,
-      _tourPrintTime,
-      _tourTotal,
-      _tourPlaceOrder,
-    ]);
-    await SessionStore.markTourSeen('home');
-  }
+  /// Showcase keys in tour order, contributed to the single combined tour
+  /// list assembled by [ShellScreen._startFullTour]. The bottom-nav coach
+  /// mark is owned by [ShellScreen] itself and inserted right after these.
+  List<GlobalKey> get tourKeys => [
+        _tourLocation,
+        _tourNotifications,
+        _tourProfile,
+        _tourToggle,
+        _tourDocument,
+        _tourPages,
+        _tourCopies,
+        _tourPrintTime,
+        _tourTotal,
+        _tourPlaceOrder,
+        _tourTodaysPrints,
+      ];
 
   Future<void> _pickPageRange() async {
     if (_detectedPages == null) return;
@@ -181,7 +176,6 @@ class HomeTabState extends State<HomeTab> {
     final state = context.read<AppState>();
     if (state.locations.isEmpty) state.loadLocations();
     _loadRate();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeStartTour());
   }
 
   Future<void> _pickLocation() async {
@@ -344,12 +338,7 @@ class HomeTabState extends State<HomeTab> {
     setState(() => _uploading = true);
 
     final state = context.read<AppState>();
-    // Show the premium overlay while the upload + page analysis runs.
-    final overlay = await showUploadOverlay(context, fileName: _fileName!);
-    if (!mounted) {
-      overlay.dismiss();
-      return;
-    }
+    if (!mounted) return;
 
     try {
       final uploaded = await state.uploadDocument(
@@ -372,7 +361,6 @@ class HomeTabState extends State<HomeTab> {
         );
       }
     } finally {
-      overlay.dismiss();
       if (mounted) setState(() => _uploading = false);
     }
   }
@@ -550,7 +538,19 @@ class HomeTabState extends State<HomeTab> {
           offset: const Offset(0, -26),
           child: FadeSlideIn(
             delay: const Duration(milliseconds: 200),
-            child: _todaySection(state),
+            child: AppShowcase(
+              key: _tourTodaysPrints,
+              title: "Today's Prints",
+              description:
+                  "Everything you've printed today, at a glance.",
+              targetShapeBorder: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(24)),
+              ),
+              enableAutoScroll: true,
+              tooltipActions: nextTooltipActions(context, step: 11, total: 18),
+              tooltipActionConfig: tooltipNextActionConfig,
+              child: _todaySection(state),
+            ),
           ),
         ),
       ],
@@ -588,7 +588,7 @@ class HomeTabState extends State<HomeTab> {
                 children: [
                   Row(
                     children: [
-                      Showcase(
+                      AppShowcase(
                         key: _tourLocation,
                         title: 'Choose Your Location',
                         description:
@@ -597,7 +597,8 @@ class HomeTabState extends State<HomeTab> {
                           borderRadius: BorderRadius.all(Radius.circular(24)),
                         ),
                         enableAutoScroll: true,
-                        tooltipActions: nextTooltipActions(context),
+                        tooltipActions: nextTooltipActions(context,
+                            step: 1, total: 18, tabIndex: 0, isFirstStepOfTab: true),
                         tooltipActionConfig: tooltipNextActionConfig,
                         child: Pressable(
                           onTap: _pickLocation,
@@ -632,14 +633,14 @@ class HomeTabState extends State<HomeTab> {
                         ),
                       ),
                       const Spacer(),
-                      Showcase(
+                      AppShowcase(
                         key: _tourNotifications,
                         title: 'Stay in the Loop',
                         description:
                             'Order updates land here — queued, printing, ready, collected.',
                         targetShapeBorder: const CircleBorder(),
                         enableAutoScroll: true,
-                        tooltipActions: nextTooltipActions(context),
+                        tooltipActions: nextTooltipActions(context, step: 2, total: 18, tabIndex: 0),
                         tooltipActionConfig: tooltipNextActionConfig,
                         child: Pressable(
                           onTap: _showNotifications,
@@ -660,14 +661,14 @@ class HomeTabState extends State<HomeTab> {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      Showcase(
+                      AppShowcase(
                         key: _tourProfile,
                         title: 'Your Profile',
                         description:
                             'View your order history and account details anytime.',
                         targetShapeBorder: const CircleBorder(),
                         enableAutoScroll: true,
-                        tooltipActions: nextTooltipActions(context),
+                        tooltipActions: nextTooltipActions(context, step: 3, total: 18, tabIndex: 0),
                         tooltipActionConfig: tooltipNextActionConfig,
                         child: Pressable(
                           onTap: widget.onViewProfile,
@@ -781,7 +782,7 @@ class HomeTabState extends State<HomeTab> {
             ],
           ),
           const SizedBox(height: 18),
-          Showcase(
+          AppShowcase(
             key: _tourToggle,
             title: 'Single or Double-Sided',
             description:
@@ -790,7 +791,7 @@ class HomeTabState extends State<HomeTab> {
               borderRadius: BorderRadius.all(Radius.circular(30)),
             ),
             enableAutoScroll: true,
-            tooltipActions: nextTooltipActions(context),
+            tooltipActions: nextTooltipActions(context, step: 4, total: 18, tabIndex: 0),
             tooltipActionConfig: tooltipNextActionConfig,
             child: PillToggle(
               options: const ['Single-sided', 'Double-sided'],
@@ -802,7 +803,7 @@ class HomeTabState extends State<HomeTab> {
             ),
           ),
           const SizedBox(height: 14),
-          Showcase(
+          AppShowcase(
             key: _tourDocument,
             title: 'Upload Your Document',
             description:
@@ -811,22 +812,27 @@ class HomeTabState extends State<HomeTab> {
               borderRadius: BorderRadius.all(Radius.circular(22)),
             ),
             enableAutoScroll: true,
-            tooltipActions: nextTooltipActions(context),
+            tooltipActions: nextTooltipActions(context, step: 5, total: 18, tabIndex: 0),
             tooltipActionConfig: tooltipNextActionConfig,
-            child: FieldChip(
-              label:
-                  _fileName == null ? 'Document' : 'Document • $_fileSizeKb KB',
-              value: _fileName ?? 'Tap to upload a file',
-              valueIsPlaceholder: _fileName == null,
-              trailingIcon: Icons.upload_file_rounded,
-              onTap: _pickFile,
+            child: AnimatedGlowBorder(
+              active: _uploading,
+              radius: 22,
+              child: FieldChip(
+                label: _fileName == null
+                    ? 'Document'
+                    : 'Document • $_fileSizeKb KB',
+                value: _fileName ?? 'Tap to upload a file',
+                valueIsPlaceholder: _fileName == null,
+                trailingIcon: Icons.upload_file_rounded,
+                onTap: _uploading ? null : _pickFile,
+              ),
             ),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                child: Showcase(
+                child: AppShowcase(
                   key: _tourPages,
                   title: 'Pick Specific Pages',
                   description:
@@ -835,7 +841,7 @@ class HomeTabState extends State<HomeTab> {
                     borderRadius: BorderRadius.all(Radius.circular(22)),
                   ),
                   enableAutoScroll: true,
-                  tooltipActions: nextTooltipActions(context),
+                  tooltipActions: nextTooltipActions(context, step: 6, total: 18, tabIndex: 0),
                   tooltipActionConfig: tooltipNextActionConfig,
                   child: FieldChip(
                     label: 'Pages',
@@ -854,7 +860,7 @@ class HomeTabState extends State<HomeTab> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Showcase(
+                child: AppShowcase(
                   key: _tourCopies,
                   title: 'Set Your Copies',
                   description: 'Use + and – to change how many copies you need.',
@@ -862,7 +868,7 @@ class HomeTabState extends State<HomeTab> {
                     borderRadius: BorderRadius.all(Radius.circular(22)),
                   ),
                   enableAutoScroll: true,
-                  tooltipActions: nextTooltipActions(context),
+                  tooltipActions: nextTooltipActions(context, step: 7, total: 18, tabIndex: 0),
                   tooltipActionConfig: tooltipNextActionConfig,
                   child: StepperChip(
                     label: 'Copies',
@@ -889,7 +895,7 @@ class HomeTabState extends State<HomeTab> {
             ),
           ],
           const SizedBox(height: 12),
-          Showcase(
+          AppShowcase(
             key: _tourPrintTime,
             title: 'Choose When to Print',
             description:
@@ -898,7 +904,7 @@ class HomeTabState extends State<HomeTab> {
               borderRadius: BorderRadius.all(Radius.circular(22)),
             ),
             enableAutoScroll: true,
-            tooltipActions: nextTooltipActions(context),
+            tooltipActions: nextTooltipActions(context, step: 8, total: 18, tabIndex: 0),
             tooltipActionConfig: tooltipNextActionConfig,
             child: FieldChip(
               label: 'Print Time',
@@ -908,7 +914,7 @@ class HomeTabState extends State<HomeTab> {
             ),
           ),
           const SizedBox(height: 16),
-          Showcase(
+          AppShowcase(
             key: _tourTotal,
             title: 'Estimated Total',
             description:
@@ -917,7 +923,7 @@ class HomeTabState extends State<HomeTab> {
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(20)),
             ),
-            tooltipActions: nextTooltipActions(context),
+            tooltipActions: nextTooltipActions(context, step: 9, total: 18, tabIndex: 0),
             tooltipActionConfig: tooltipNextActionConfig,
             child: Container(
               padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
@@ -977,7 +983,7 @@ class HomeTabState extends State<HomeTab> {
             ),
           ),
           const SizedBox(height: 14),
-          Showcase(
+          AppShowcase(
             key: _tourPlaceOrder,
             title: 'Place Your Order',
             description:
@@ -986,7 +992,7 @@ class HomeTabState extends State<HomeTab> {
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(16)),
             ),
-            tooltipActions: nextTooltipActions(context),
+            tooltipActions: nextTooltipActions(context, step: 10, total: 18, tabIndex: 0),
             tooltipActionConfig: tooltipNextActionConfig,
             child: FilledButton(
               onPressed: (_placing || _uploading) ? null : _placeOrder,

@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:showcaseview/showcaseview.dart';
 
 import '../data/pricing.dart';
 import '../models/print_order.dart';
-import '../services/session_store.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fx.dart';
@@ -26,24 +24,12 @@ class OrdersTab extends StatefulWidget {
 
 class OrdersTabState extends State<OrdersTab> {
   int _filter = 0;
-  bool _tourStarted = false;
   final _tourToggle = GlobalKey();
   final _tourList = GlobalKey();
 
-  /// True once the first-run coach-mark tour of the Orders tab has been
-  /// shown. Triggered by [ShellScreen] right after this tab is first
-  /// selected — never re-shown afterwards, even across logouts.
-  Future<void> maybeStartTour() async {
-    if (_tourStarted || !mounted) return;
-    final seen = await SessionStore.seenTour('orders');
-    if (seen || !mounted) return;
-    _tourStarted = true;
-    ShowCaseWidget.of(context).startShowCase([
-      _tourToggle,
-      _tourList,
-    ]);
-    await SessionStore.markTourSeen('orders');
-  }
+  /// Showcase keys in tour order, contributed to the single combined tour
+  /// list assembled by [ShellScreen._startFullTour].
+  List<GlobalKey> get tourKeys => [_tourToggle, _tourList];
 
   @override
   Widget build(BuildContext context) {
@@ -72,7 +58,7 @@ class OrdersTabState extends State<OrdersTab> {
               style: const TextStyle(color: Colors.white54, fontSize: 13),
             ),
             const SizedBox(height: 18),
-            Showcase(
+            AppShowcase(
               key: _tourToggle,
               title: 'Active vs History',
               description:
@@ -81,7 +67,8 @@ class OrdersTabState extends State<OrdersTab> {
                 borderRadius: BorderRadius.all(Radius.circular(30)),
               ),
               enableAutoScroll: true,
-              tooltipActions: nextTooltipActions(context),
+              tooltipActions: nextTooltipActions(context,
+                  step: 13, total: 18, tabIndex: 1, isFirstStepOfTab: true),
               tooltipActionConfig: tooltipNextActionConfig,
               child: PillToggle(
                 options: const ['Active', 'History'],
@@ -92,13 +79,13 @@ class OrdersTabState extends State<OrdersTab> {
             ),
             const SizedBox(height: 18),
             Expanded(
-              child: Showcase(
+              child: AppShowcase(
                 key: _tourList,
                 title: 'Your Orders',
                 description:
                     'Tap any order to see its live status and full details.',
                 enableAutoScroll: true,
-                tooltipActions: nextTooltipActions(context),
+                tooltipActions: nextTooltipActions(context, step: 14, total: 18, tabIndex: 1),
                 tooltipActionConfig: tooltipNextActionConfig,
                 child: RefreshIndicator(
                   onRefresh: () => context.read<AppState>().refreshOrders(),
