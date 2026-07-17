@@ -1,7 +1,6 @@
-import 'dart:typed_data';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -365,6 +364,24 @@ class HomeTabState extends State<HomeTab> {
     }
   }
 
+  /// Clears the picked document and every piece of state derived from it.
+  /// Print settings (copies, side, schedule) are intentionally preserved —
+  /// they aren't document-derived. `_estimate` follows automatically, and
+  /// `_ratePerPage` is keyed on side rather than the file, so it stays.
+  void _resetDocument() {
+    _fileName = null;
+    _fileBytes = null;
+    _fileSizeKb = 0;
+    _fileId = null;
+    _detectedPages = null;
+    _selectedPages = null;
+  }
+
+  void _removeDocument() {
+    HapticFeedback.selectionClick();
+    setState(_resetDocument);
+  }
+
   Future<void> _pickSchedule() async {
     final choice = await showModalBottomSheet<String>(
       context: context,
@@ -472,12 +489,7 @@ class HomeTabState extends State<HomeTab> {
           );
       if (!mounted) return;
       setState(() {
-        _fileName = null;
-        _fileBytes = null;
-        _fileSizeKb = 0;
-        _fileId = null;
-        _detectedPages = null;
-        _selectedPages = null;
+        _resetDocument();
         _copies = 1;
         _sideIndex = 0;
         _scheduledAt = null;
@@ -817,14 +829,25 @@ class HomeTabState extends State<HomeTab> {
             child: AnimatedGlowBorder(
               active: _uploading,
               radius: 22,
-              child: FieldChip(
-                label: _fileName == null
-                    ? 'Document'
-                    : 'Document • $_fileSizeKb KB',
-                value: _fileName ?? 'Tap to upload a file',
-                valueIsPlaceholder: _fileName == null,
-                trailingIcon: Icons.upload_file_rounded,
-                onTap: _uploading ? null : _pickFile,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  FieldChip(
+                    label: _fileName == null
+                        ? 'Document'
+                        : 'Document • $_fileSizeKb KB',
+                    value: _fileName ?? 'Tap to upload a file',
+                    valueIsPlaceholder: _fileName == null,
+                    trailingIcon: Icons.upload_file_rounded,
+                    onTap: _uploading ? null : _pickFile,
+                  ),
+                  if (_fileName != null && !_uploading)
+                    Positioned(
+                      top: -5,
+                      right: -5,
+                      child: _RemoveDocumentButton(onTap: _removeDocument),
+                    ),
+                ],
               ),
             ),
           ),
@@ -1210,6 +1233,50 @@ class HomeTabState extends State<HomeTab> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Circular remove affordance for the document chip. Uses [Material] +
+/// [InkWell] rather than [Pressable]/[GestureDetector] so it carries hover
+/// and focus states as well as the tap ripple.
+///
+/// The 40x40 box is deliberately larger than the 28px circle and aligns it
+/// to the top-right: the badge is positioned to overhang the chip's corner,
+/// and pixels outside the parent [Stack] can't be hit-tested, so the extra
+/// box keeps ~35x35 of live tap target inside the chip.
+class _RemoveDocumentButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _RemoveDocumentButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: Align(
+        alignment: Alignment.topRight,
+        child: Tooltip(
+          message: 'Remove document',
+          child: Material(
+            color: AppColors.white,
+            elevation: 2,
+            shadowColor: Colors.black.withValues(alpha: 0.18),
+            shape: CircleBorder(
+              side: BorderSide(color: AppColors.border.withValues(alpha: 0.7)),
+            ),
+            child: InkWell(
+              onTap: onTap,
+              customBorder: const CircleBorder(),
+              child: const SizedBox(
+                width: 28,
+                height: 28,
+                child: Icon(Icons.close_rounded, size: 16, color: AppColors.black),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -366,9 +366,9 @@ class _GlowBorderPainter extends CustomPainter {
       transform: rotation,
       colors: const [
         Colors.transparent,
-        Colors.white24,
-        Colors.white,
-        Colors.white24,
+        Colors.black26,
+        AppColors.black,
+        Colors.black26,
         Colors.transparent,
       ],
       stops: const [0.0, 0.35, 0.5, 0.65, 1.0],
