@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:showcaseview/showcaseview.dart';
 
 import '../data/pricing.dart';
 import '../models/print_order.dart';
@@ -10,7 +11,9 @@ import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fx.dart';
 import '../widgets/status_chip.dart';
+import '../widgets/showcase_next_button.dart';
 import '../widgets/ticket_card.dart';
+import '../services/session_store.dart';
 import 'otp_verification_screen.dart';
 
 class OrderDetailScreen extends StatefulWidget {
@@ -24,6 +27,26 @@ class OrderDetailScreen extends StatefulWidget {
 
 class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _busy = false;
+  final _tourTimeline = GlobalKey();
+  final _tourCost = GlobalKey();
+  final _tourActions = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeStartTour());
+  }
+
+  Future<void> _maybeStartTour() async {
+    final seen = await SessionStore.seenTour('orderDetail');
+    if (seen || !mounted) return;
+    ShowCaseWidget.of(context).startShowCase([
+      _tourTimeline,
+      _tourCost,
+      _tourActions,
+    ]);
+    await SessionStore.markTourSeen('orderDetail');
+  }
 
   Future<void> _payNow(PrintOrder order) async {
     if (_busy) return;
@@ -210,17 +233,50 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   const SizedBox(height: 16),
                   FadeSlideIn(
                     delay: const Duration(milliseconds: 70),
-                    child: _timelineCard(order),
+                    child: AppShowcase(
+                      key: _tourTimeline,
+                      title: 'Track Your Order',
+                      description:
+                          'Follow your job from pending all the way to collected.',
+                      targetShapeBorder: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(26)),
+                      ),
+                      enableAutoScroll: true,
+                      tooltipActions: nextTooltipActions(context, step: 1, total: 3),
+                      tooltipActionConfig: tooltipNextActionConfig,
+                      child: _timelineCard(order),
+                    ),
                   ),
                   const SizedBox(height: 16),
                   FadeSlideIn(
                     delay: const Duration(milliseconds: 140),
-                    child: _costCard(order),
+                    child: Showcase(
+                      key: _tourCost,
+                      title: 'Cost Breakdown',
+                      description:
+                          'See exactly how this order was priced, rate per page included.',
+                      targetShapeBorder: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(26)),
+                      ),
+                      enableAutoScroll: true,
+                      tooltipActions: nextTooltipActions(context, step: 2, total: 3),
+                      tooltipActionConfig: tooltipNextActionConfig,
+                      child: _costCard(order),
+                    ),
                   ),
                   const SizedBox(height: 20),
                   FadeSlideIn(
                     delay: const Duration(milliseconds: 210),
-                    child: _actions(context, order),
+                    child: AppShowcase(
+                      key: _tourActions,
+                      title: 'Take Action',
+                      description:
+                          'Pay, cancel, or request collection right from here.',
+                      enableAutoScroll: true,
+                      tooltipActions: nextTooltipActions(context, step: 3, total: 3),
+                      tooltipActionConfig: tooltipNextActionConfig,
+                      child: _actions(context, order),
+                    ),
                   ),
                 ],
               ),

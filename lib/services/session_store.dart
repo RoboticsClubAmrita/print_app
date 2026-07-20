@@ -66,4 +66,15 @@ class SessionStore {
 
   static Future<void> markWalkthroughSeen() =>
       _storage.write(key: _seenWalkthroughKey, value: 'true');
+
+  // ---------------- Feature tours (arrow coach marks), one flag per tab -----
+
+  /// True once the given tab's first-run coach-mark tour has been shown.
+  /// Checked from each tab right after it becomes visible for the first
+  /// time — never re-shown afterwards, even across logouts.
+  static Future<bool> seenTour(String tourKey) async =>
+      (await _storage.read(key: 'seen_tour_$tourKey')) == 'true';
+
+  static Future<void> markTourSeen(String tourKey) =>
+      _storage.write(key: 'seen_tour_$tourKey', value: 'true');
 }

@@ -2,19 +2,24 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:showcaseview/showcaseview.dart';
 
 import '../data/pricing.dart';
+import '../services/session_store.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/bottom_nav.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
+import '../widgets/showcase_next_button.dart';
 import 'billing_screen.dart';
 import 'edit_profile_screen.dart';
 import 'home_screen.dart';
 import 'login_screen.dart';
 import 'orders_screen.dart';
 import 'walkthrough_screen.dart';
+
+
 
 /// Hosts the four tabs behind the floating black pill navigation.
 class ShellScreen extends StatefulWidget {
@@ -27,6 +32,11 @@ class ShellScreen extends StatefulWidget {
 class _ShellScreenState extends State<ShellScreen>
     with SingleTickerProviderStateMixin {
   int _index = 0;
+  final _homeKey = GlobalKey<HomeTabState>();
+  final _tourBottomNav = GlobalKey();
+  final _ordersKey = GlobalKey<OrdersTabState>();
+  final _billingKey = GlobalKey<BillingTabState>();
+  final _profileKey = GlobalKey<ProfileTabState>();
   late final AnimationController _tabAnim = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 280),
@@ -38,6 +48,10 @@ class _ShellScreenState extends State<ShellScreen>
   );
   Timer? _pollTimer;
   late final AppState _appState;
+
+  /// Maps each step index in the single combined showcase list to the tab
+  /// (0-3) that owns it, so [_onTourStep] knows which tab to switch to.
+  List<int> _tabForStep = const [];
 
   @override
   void initState() {
@@ -52,6 +66,83 @@ class _ShellScreenState extends State<ShellScreen>
     _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       _appState.refreshOrders();
     });
+    // The whole four-tab coach-mark tour runs as a single showcase list
+    // (see _startFullTour); onStart switches the visible tab as the tour
+    // crosses tab boundaries, so Back/Next just work via the library's own
+    // previous()/next() — no per-tab chaining needed.
+    TourCoordinator.onFinish = _onTourFinish;
+    TourCoordinator.onStart = _onTourStep;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final seen = await SessionStore.seenTour('tour');
+      if (seen || !mounted) return;
+      _startFullTour();
+    });
+  }
+
+  /// Concatenates every tab's showcase keys into one ordered list (Home →
+  /// bottom nav → Orders → Billing → Profile) and starts a single showcase
+  /// across all of them. Running the whole tour as one list — instead of
+  /// four separate per-tab lists chained by hand — is what lets
+  /// ShowCaseWidget's own next()/previous() walk every step, forward and
+  /// backward, without special-casing tab boundaries.
+  void _startFullTour() {
+    final home = _homeKey.currentState;
+    final orders = _ordersKey.currentState;
+    final billing = _billingKey.currentState;
+    final profile = _profileKey.currentState;
+    if (home == null || orders == null || billing == null || profile == null) {
+      return;
+    }
+
+    final keys = <GlobalKey>[
+      ...home.tourKeys,
+      _tourBottomNav,
+      ...orders.tourKeys,
+      ...billing.tourKeys,
+      ...profile.tourKeys,
+    ];
+    _tabForStep = [
+      for (var i = 0; i < home.tourKeys.length; i++) 0,
+      0, // bottom nav coach mark lives on Home's tab
+      for (var i = 0; i < orders.tourKeys.length; i++) 1,
+      for (var i = 0; i < billing.tourKeys.length; i++) 2,
+      for (var i = 0; i < profile.tourKeys.length; i++) 3,
+    ];
+    ShowCaseWidget.of(context).startShowCase(keys);
+  }
+
+  /// Switches to whichever tab owns the showcase step at [index]. Snaps
+  /// instantly (no slide) so the coach mark measures a settled frame instead
+  /// of painting over a still-transitioning tab.
+  void _onTourStep(int index) {
+    if (index < 0 || index >= _tabForStep.length) return;
+    final tab = _tabForStep[index];
+    if (tab != _index) {
+      setState(() => _index = tab);
+      _tabAnim.value = 1;
+    }
+  }
+
+  void _onTourFinish() {
+    _showWelcomeDialog();
+  }
+
+  /// Shown once the very last coach-mark step (Profile → Your Print
+  /// History) has been dismissed — i.e. after the full tour has played out.
+  /// The tour is only considered fully "ended" once the user taps OK below,
+  /// not merely when the last showcase step closes.
+  Future<void> _showWelcomeDialog() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => _WelcomeDialog(
+        onOkPressed: () => Navigator.of(dialogContext).pop(),
+      ),
+    );
+    // Only past this point is the tour considered truly ended.
+    await SessionStore.markTourSeen('tour');
   }
 
   void _onStateChange() {
@@ -81,9 +172,16 @@ class _ShellScreenState extends State<ShellScreen>
     _pollTimer?.cancel();
     _tabCurve.dispose();
     _tabAnim.dispose();
+    if (TourCoordinator.onFinish == _onTourFinish) {
+      TourCoordinator.onFinish = null;
+    }
+    if (TourCoordinator.onStart == _onTourStep) {
+      TourCoordinator.onStart = null;
+    }
     super.dispose();
   }
 
+  // Changes the selected tab.
   void _selectTab(int i) {
     if (i == _index) return;
     setState(() => _index = i);
@@ -107,12 +205,14 @@ class _ShellScreenState extends State<ShellScreen>
               index: _index,
               children: [
                 HomeTab(
+                  key: _homeKey,
                   onViewOrders: () => _selectTab(1),
                   onViewProfile: () => _selectTab(3),
+                  bottomNavKey: _tourBottomNav,
                 ),
-                const OrdersTab(),
-                const BillingTab(),
-                const _ProfileTab(),
+                OrdersTab(key: _ordersKey),
+                BillingTab(key: _billingKey),
+                ProfileTab(key: _profileKey),
               ],
             ),
           ),
@@ -121,15 +221,44 @@ class _ShellScreenState extends State<ShellScreen>
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.fromLTRB(24, 0, 24, 18),
         child: SafeArea(
-          child: FloatingBottomNav(index: _index, onTap: _selectTab),
+          child: AppShowcase(
+            key: _tourBottomNav,
+            title: 'Switch Between Tabs',
+            description:
+                'Jump to Orders, Billing or Profile anytime using this bar.',
+            targetShapeBorder: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(30)),
+            ),
+            enableAutoScroll: true,
+            tooltipActions: nextTooltipActions(context, step: 12, total: 18, tabIndex: 0),
+            tooltipActionConfig: tooltipNextActionConfig,
+            child: FloatingBottomNav(index: _index, onTap: _selectTab),
+          ),
         ),
       ),
     );
   }
 }
 
-class _ProfileTab extends StatelessWidget {
-  const _ProfileTab();
+class ProfileTab extends StatefulWidget {
+  const ProfileTab({super.key});
+
+  @override
+  State<ProfileTab> createState() => ProfileTabState();
+}
+
+class ProfileTabState extends State<ProfileTab> {
+  final _tourIdentity = GlobalKey();
+  final _tourStats = GlobalKey();
+
+  // Every showcase step scrolls the page to bring its target into view
+  // before highlighting it, so a step lower down the page is always
+  // reachable regardless of scroll position when the tour starts.
+  static const _tourScrollDuration = Duration(milliseconds: 300);
+
+  /// Showcase keys in tour order, contributed to the single combined tour
+  /// list assembled by [ShellScreen._startFullTour].
+  List<GlobalKey> get tourKeys => [_tourIdentity, _tourStats];
 
   @override
   Widget build(BuildContext context) {
@@ -153,29 +282,53 @@ class _ProfileTab extends StatelessWidget {
           const SizedBox(height: 18),
           FadeSlideIn(
             delay: const Duration(milliseconds: 60),
-            child: _identityCard(user?.initials ?? '?', user?.name ?? 'Guest',
-                user?.email ?? ''),
+            child: AppShowcase(
+              key: _tourIdentity,
+              title: 'Your Profile',
+              description: 'Your name, email and member status live here.',
+              targetShapeBorder: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(28)),
+              ),
+              enableAutoScroll: true,
+              tooltipActions: nextTooltipActions(context,
+                  step: 17, total: 18, tabIndex: 3, isFirstStepOfTab: true),
+              tooltipActionConfig: tooltipNextActionConfig,
+              child: _identityCard(user?.initials ?? '?', user?.name ?? 'Guest',
+                  user?.email ?? ''),
+            ),
           ),
           const SizedBox(height: 14),
           FadeSlideIn(
             delay: const Duration(milliseconds: 130),
-            child: Row(
-              children: [
-                _statCard(
-                    Icons.print_rounded, 'Orders', '${state.orders.length}'),
-                const SizedBox(width: 12),
-                _statCard(Icons.inventory_2_outlined, 'Collected',
-                    '${state.historyOrders.length}'),
-                const SizedBox(width: 12),
-                _statCard(Icons.account_balance_wallet_outlined, 'Spent',
-                    rupees(state.totalSpent)),
-              ],
+            child: AppShowcase(
+              key: _tourStats,
+              title: 'Your Print History',
+              description:
+                  'Track your total orders, collected prints and amount spent at a glance.',
+              targetShapeBorder: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(22)),
+              ),
+              enableAutoScroll: true,
+              tooltipActions: nextTooltipActions(context, step: 18, total: 18, tabIndex: 3),
+              tooltipActionConfig: tooltipNextActionConfig,
+              child: Row(
+                children: [
+                  _statCard(
+                      Icons.print_rounded, 'Orders', '${state.orders.length}'),
+                  const SizedBox(width: 12),
+                  _statCard(Icons.inventory_2_outlined, 'Collected',
+                      '${state.historyOrders.length}'),
+                  const SizedBox(width: 12),
+                  _statCard(Icons.account_balance_wallet_outlined, 'Spent',
+                      rupees(state.totalSpent)),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 26),
-          const FadeSlideIn(
-            delay: Duration(milliseconds: 200),
-            child: Text(
+          FadeSlideIn(
+            delay: const Duration(milliseconds: 200),
+            child: const Text(
               'Account',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
             ),
@@ -636,6 +789,72 @@ class _RatesSheetContentState extends State<_RatesSheetContent> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Small congratulatory pop-up shown once, after the entire four-tab
+/// coach-mark tour has finished. The tour is only considered "ended" once
+/// the user taps OK here — not when the last showcase tooltip closes.
+class _WelcomeDialog extends StatelessWidget {
+  final VoidCallback onOkPressed;
+
+  const _WelcomeDialog({required this.onOkPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(24, 28, 24, 22),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(28),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                gradient: AppDecor.darkPanelGradient,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.celebration_rounded,
+                color: AppColors.white,
+                size: 30,
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              "You're All Set!",
+              style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Welcome to PrintEase — you now know your way around. '
+              'Go ahead and place your first print order!',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13.5,
+                height: 1.5,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 22),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: onOkPressed,
+                child: const Text('OK'),
+              ),
+            ),
+          ],
         ),
       ),
     );

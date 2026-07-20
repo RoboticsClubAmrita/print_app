@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -271,6 +273,130 @@ class _SuccessCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Wraps [child] with a rotating glowing border while [active] is true —
+/// the same "AI is working" look as VS Code's Claude/Copilot loading state.
+/// When inactive, [child] is returned unchanged so the widget's normal look
+/// is untouched. The border never intercepts touches, so [child] stays
+/// interactive (or not) purely based on what its own callbacks do.
+class AnimatedGlowBorder extends StatefulWidget {
+  final Widget child;
+  final bool active;
+  final double radius;
+
+  const AnimatedGlowBorder({
+    super.key,
+    required this.child,
+    required this.active,
+    this.radius = 22,
+  });
+
+  @override
+  State<AnimatedGlowBorder> createState() => _AnimatedGlowBorderState();
+}
+
+class _AnimatedGlowBorderState extends State<AnimatedGlowBorder>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.active) _controller.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant AnimatedGlowBorder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && !oldWidget.active) {
+      _controller.repeat();
+    } else if (!widget.active && oldWidget.active) {
+      _controller.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.active) return widget.child;
+    return Stack(
+      children: [
+        widget.child,
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) => CustomPaint(
+                painter: _GlowBorderPainter(
+                  t: _controller.value,
+                  radius: widget.radius,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _GlowBorderPainter extends CustomPainter {
+  final double t;
+  final double radius;
+
+  _GlowBorderPainter({required this.t, required this.radius});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final rrect =
+        RRect.fromRectAndRadius(rect.deflate(1), Radius.circular(radius));
+    final rotation = GradientRotation(2 * math.pi * t);
+
+    final sweep = SweepGradient(
+      transform: rotation,
+      colors: const [
+        Colors.transparent,
+        Colors.black26,
+        AppColors.black,
+        Colors.black26,
+        Colors.transparent,
+      ],
+      stops: const [0.0, 0.35, 0.5, 0.65, 1.0],
+    );
+
+    // Soft bloom underneath the crisp sweep, matching the diffuse glow of
+    // the VS Code Claude/Copilot loading border.
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..shader = sweep.createShader(rect)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+    );
+
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..shader = sweep.createShader(rect)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_GlowBorderPainter old) =>
+      old.t != t || old.radius != radius;
 }
 
 /// Constrains content width on large screens so layouts stay phone-shaped

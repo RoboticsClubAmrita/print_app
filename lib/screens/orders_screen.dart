@@ -8,6 +8,7 @@ import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fx.dart';
 import '../widgets/pill_toggle.dart';
+import '../widgets/showcase_next_button.dart';
 import '../widgets/status_chip.dart';
 import '../widgets/ticket_card.dart';
 import 'order_detail_screen.dart';
@@ -18,11 +19,17 @@ class OrdersTab extends StatefulWidget {
   const OrdersTab({super.key});
 
   @override
-  State<OrdersTab> createState() => _OrdersTabState();
+  State<OrdersTab> createState() => OrdersTabState();
 }
 
-class _OrdersTabState extends State<OrdersTab> {
+class OrdersTabState extends State<OrdersTab> {
   int _filter = 0;
+  final _tourToggle = GlobalKey();
+  final _tourList = GlobalKey();
+
+  /// Showcase keys in tour order, contributed to the single combined tour
+  /// list assembled by [ShellScreen._startFullTour].
+  List<GlobalKey> get tourKeys => [_tourToggle, _tourList];
 
   @override
   Widget build(BuildContext context) {
@@ -51,37 +58,60 @@ class _OrdersTabState extends State<OrdersTab> {
               style: const TextStyle(color: Colors.white54, fontSize: 13),
             ),
             const SizedBox(height: 18),
-            PillToggle(
-              options: const ['Active', 'History'],
-              selectedIndex: _filter,
-              onChanged: (i) => setState(() => _filter = i),
-              onDark: true,
+            AppShowcase(
+              key: _tourToggle,
+              title: 'Active vs History',
+              description:
+                  'Switch between orders in progress and past collected prints.',
+              targetShapeBorder: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(30)),
+              ),
+              enableAutoScroll: true,
+              tooltipActions: nextTooltipActions(context,
+                  step: 13, total: 18, tabIndex: 1, isFirstStepOfTab: true),
+              tooltipActionConfig: tooltipNextActionConfig,
+              child: PillToggle(
+                options: const ['Active', 'History'],
+                selectedIndex: _filter,
+                onChanged: (i) => setState(() => _filter = i),
+                onDark: true,
+              ),
             ),
             const SizedBox(height: 18),
             Expanded(
-              child: RefreshIndicator(
-                onRefresh: () => context.read<AppState>().refreshOrders(),
-                child: orders.isEmpty
-                    ? ListView(
-                        key: ValueKey('empty-$_filter'),
-                        children: [
-                          const SizedBox(height: 60),
-                          FadeSlideIn(
-                            from: const Offset(0, 0.04),
-                            child: _emptyState(),
+              child: AppShowcase(
+                key: _tourList,
+                title: 'Your Orders',
+                description:
+                    'Tap any order to see its live status and full details.',
+                enableAutoScroll: true,
+                tooltipActions: nextTooltipActions(context, step: 14, total: 18, tabIndex: 1),
+                tooltipActionConfig: tooltipNextActionConfig,
+                child: RefreshIndicator(
+                  onRefresh: () => context.read<AppState>().refreshOrders(),
+                  child: orders.isEmpty
+                      ? ListView(
+                          key: ValueKey('empty-$_filter'),
+                          children: [
+                            const SizedBox(height: 60),
+                            FadeSlideIn(
+                              from: const Offset(0, 0.04),
+                              child: _emptyState(),
+                            ),
+                          ],
+                        )
+                      : ListView.separated(
+                          key: ValueKey('list-$_filter'),
+                          padding: const EdgeInsets.only(bottom: 120),
+                          itemCount: orders.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 14),
+                          itemBuilder: (context, i) => FadeSlideIn(
+                            delay: Duration(milliseconds: 50 * (i < 6 ? i : 6)),
+                            child: _orderTicket(context, orders[i]),
                           ),
-                        ],
-                      )
-                    : ListView.separated(
-                        key: ValueKey('list-$_filter'),
-                        padding: const EdgeInsets.only(bottom: 120),
-                        itemCount: orders.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 14),
-                        itemBuilder: (context, i) => FadeSlideIn(
-                          delay: Duration(milliseconds: 50 * (i < 6 ? i : 6)),
-                          child: _orderTicket(context, orders[i]),
                         ),
-                      ),
+                ),
               ),
             ),
           ],

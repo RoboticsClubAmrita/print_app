@@ -1,11 +1,13 @@
+import 'package:showcaseview/showcaseview.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 
-import 'screens/splash_screen.dart';
+import 'screens/login_screen.dart';
 import 'services/notification_service.dart';
 import 'state/app_state.dart';
 import 'theme/app_theme.dart';
+import 'widgets/showcase_next_button.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,11 +23,17 @@ class PrintServiceApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
       create: (_) => AppState(),
-      child: MaterialApp(
-        title: 'PrintEase',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light,
-        home: const SplashScreen(),
+      child: ShowCaseWidget(
+        disableBarrierInteraction: true,
+        scrollDuration: const Duration(milliseconds: 300),
+        onFinish: () => TourCoordinator.onFinish?.call(),
+        onStart: (index, key) => TourCoordinator.onStart?.call(index ?? 0),
+        builder: (context) => MaterialApp(
+          title: 'PrintEase',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light,
+          home: const LoginScreen(),
+        ),
       ),
     );
   }
