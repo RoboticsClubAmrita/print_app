@@ -1,4 +1,9 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:pdf_combiner/pdf_combiner.dart';
+import 'package:pdf_combiner/models/merge_input.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -41,6 +46,7 @@ const _kPrintableExtensions = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'];
 class HomeTabState extends State<HomeTab> {
   String? _fileName;
   Uint8List? _fileBytes;
+  List<PlatformFile> _selectedSourceFiles = [];
   int _fileSizeKb = 0;
   String? _fileId;
   int? _detectedPages;
@@ -300,40 +306,198 @@ class HomeTabState extends State<HomeTab> {
     );
   }
 
-  Future<void> _pickFile() async {
+  Future<void> _showDocumentPicker() async {
+    if (_picking || _uploading) return;
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Add documents',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Choose multiple files or select a folder. PDF and image files are merged into one PDF.',
+                style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.45),
+              ),
+              const SizedBox(height: 18),
+              FilledButton.icon(
+                icon: const Icon(Icons.file_copy_outlined),
+                label: const Text('Choose files'),
+                onPressed: () => Navigator.of(sheetContext).pop('files'),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.folder_open_rounded),
+                label: const Text('Choose folder'),
+                onPressed: () => Navigator.of(sheetContext).pop('folder'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (!mounted || choice == null) return;
+    if (choice == 'folder') {
+      await _pickFolder();
+    } else {
+      await _pickFiles();
+    }
+  }
+
+  Future<void> _pickFiles() async {
     if (_picking) return;
     setState(() => _picking = true);
     try {
       final result = await FilePicker.platform.pickFiles(
-  withData: true,
-  type: FileType.any,
-);
-      if (result != null && result.files.isNotEmpty && mounted) {
-        final f = result.files.first;
-        if (f.bytes == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not read that file')),
-          );
-        } else {
-          setState(() {
-            _fileName = f.name;
-            _fileBytes = f.bytes;
-            _fileSizeKb = (f.size / 1024).ceil();
-            _fileId = null;
-            _detectedPages = null;
-            _selectedPages = null;
-          });
-          await _uploadPicked();
-        }
+        withData: true,
+        allowMultiple: true,
+        type: FileType.custom,
+        allowedExtensions: _kPrintableExtensions,
+      );
+      if (result == null || result.files.isEmpty || !mounted) return;
+      await _prepareSelectedFiles(result.files);
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  Future<void> _pickFolder() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      final folderPath = await FilePicker.platform.getDirectoryPath();
+      if (folderPath == null || !mounted) return;
+      final directory = Directory(folderPath);
+      if (!await directory.exists()) {
+        throw const FileSystemException('The selected folder could not be opened.');
+      }
+
+      final files = <PlatformFile>[];
+      await for (final entity in directory.list(recursive: true, followLinks: false)) {
+        if (entity is! File) continue;
+        final name = entity.uri.pathSegments.isEmpty ? entity.path : entity.uri.pathSegments.last;
+        final extension = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+        if (!_kPrintableExtensions.contains(extension)) continue;
+        final bytes = await entity.readAsBytes();
+        files.add(PlatformFile(name: name, size: bytes.length, path: entity.path, bytes: bytes));
+      }
+
+      if (!mounted) return;
+      if (files.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('The selected folder has no supported documents.')),
+        );
+        return;
+      }
+      await _prepareSelectedFiles(files);
+    } on FileSystemException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This device did not provide access to that folder. Choose multiple files instead.')),
+        );
       }
     } finally {
       if (mounted) setState(() => _picking = false);
     }
   }
 
+  Future<void> _prepareSelectedFiles(List<PlatformFile> pickedFiles) async {
+    final unique = <String, PlatformFile>{};
+    for (final file in [..._selectedSourceFiles, ...pickedFiles]) {
+      final extension = file.name.contains('.') ? file.name.split('.').last.toLowerCase() : '';
+      if (!_kPrintableExtensions.contains(extension)) continue;
+      unique['${file.name}:${file.size}:${file.path ?? ''}'] = file;
+    }
+
+    final selected = unique.values.toList();
+    if (selected.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No supported files were selected.')),
+      );
+      return;
+    }
+
+    final hasWordFile = selected.any((file) {
+      final name = file.name.toLowerCase();
+      return name.endsWith('.doc') || name.endsWith('.docx');
+    });
+    if (hasWordFile) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Word files cannot be merged on the device yet. Convert them to PDF first.')),
+      );
+      return;
+    }
+
+    final readableFiles = <PlatformFile>[];
+    for (final file in selected) {
+      Uint8List? bytes = file.bytes;
+      if (bytes == null && file.path != null) bytes = await File(file.path!).readAsBytes();
+      if (bytes == null) throw StateError('Could not read ${file.name}');
+      readableFiles.add(PlatformFile(name: file.name, size: bytes.length, path: file.path, bytes: bytes));
+    }
+
+    setState(() {
+      _selectedSourceFiles = readableFiles;
+      _fileName = readableFiles.length == 1 ? readableFiles.first.name : 'combined-documents.pdf';
+      _fileId = null;
+      _detectedPages = null;
+      _selectedPages = null;
+    });
+    await _mergeAndUploadSelected();
+  }
+
+  Future<void> _mergeAndUploadSelected() async {
+    if (_selectedSourceFiles.isEmpty) return;
+    setState(() => _uploading = true);
+    try {
+      Uint8List finalBytes;
+      String finalName;
+
+      if (_selectedSourceFiles.length == 1 && _selectedSourceFiles.first.name.toLowerCase().endsWith('.pdf')) {
+        finalBytes = _selectedSourceFiles.first.bytes!;
+        finalName = _selectedSourceFiles.first.name;
+      } else {
+        final tempDirectory = await getTemporaryDirectory();
+        final outputPath = '${tempDirectory.path}${Platform.pathSeparator}combined-documents-${DateTime.now().millisecondsSinceEpoch}.pdf';
+        final inputs = _selectedSourceFiles.map((file) => MergeInput.bytes(file.bytes!)).toList();
+        final generatedPath = await PdfCombiner.generatePDFFromDocuments(inputs: inputs, outputPath: outputPath);
+        finalBytes = await File(generatedPath).readAsBytes();
+        finalName = 'combined-documents.pdf';
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _fileName = finalName;
+        _fileBytes = finalBytes;
+        _fileSizeKb = (finalBytes.length / 1024).ceil();
+      });
+      await _uploadPicked();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not merge the selected documents: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
   Future<void> _uploadPicked() async {
     if (_fileBytes == null || _fileName == null) return;
-    setState(() => _uploading = true);
 
     final state = context.read<AppState>();
     if (!mounted) return;
@@ -358,8 +522,6 @@ class HomeTabState extends State<HomeTab> {
           const SnackBar(content: Text('Could not read the document. Try again.')),
         );
       }
-    } finally {
-      if (mounted) setState(() => _uploading = false);
     }
   }
 
@@ -368,6 +530,7 @@ class HomeTabState extends State<HomeTab> {
   /// they aren't document-derived. `_estimate` follows automatically, and
   /// `_ratePerPage` is keyed on side rather than the file, so it stays.
   void _resetDocument() {
+    _selectedSourceFiles = [];
     _fileName = null;
     _fileBytes = null;
     _fileSizeKb = 0;
@@ -833,12 +996,12 @@ class HomeTabState extends State<HomeTab> {
                 children: [
                   FieldChip(
                     label: _fileName == null
-                        ? 'Document'
-                        : 'Document • $_fileSizeKb KB',
-                    value: _fileName ?? 'Tap to upload a file',
+                        ? 'Documents'
+                        : '${_selectedSourceFiles.length} file${_selectedSourceFiles.length == 1 ? '' : 's'} • $_fileSizeKb KB',
+                    value: _fileName ?? 'Tap to choose files or a folder',
                     valueIsPlaceholder: _fileName == null,
                     trailingIcon: Icons.upload_file_rounded,
-                    onTap: _uploading ? null : _pickFile,
+                    onTap: _uploading ? null : _showDocumentPicker,
                   ),
                   if (_fileName != null && !_uploading)
                     Positioned(
@@ -1308,3 +1471,4 @@ class _StatusDot extends StatelessWidget {
     );
   }
 }
+

@@ -20,6 +20,8 @@ dependencies:
   flutter_local_notifications: ^18.0.1
   printing: ^5.14.3
   showcaseview: ^5.0.2
+  pdf_combiner: ^6.2.0
+  path_provider: ^2.1.5
 
 dev_dependencies:
   flutter_test:
@@ -27,11 +29,6 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.14.3
 
-# flutter_plugin_android_lifecycle 2.0.2x+ requires apps/plugins that
-# depend on it to compile against Android API 36, which file_picker 8.x's
-# own Android module doesn't yet declare. Pin to a pre-36 release so the
-# AAR metadata check passes without touching file_picker's major version
-# (11.x hits an unrelated Kotlin/Java classpath bug under this Gradle/AGP).
 dependency_overrides:
   flutter_plugin_android_lifecycle: 2.0.20
 
@@ -51,4 +48,3 @@ flutter_launcher_icons:
   min_sdk_android: 21
   adaptive_icon_background: "#0B0B0D"
   adaptive_icon_foreground: "assets/icon/printease_icon.png"
-

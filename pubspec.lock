@@ -145,6 +145,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  file_magic_number:
+    dependency: transitive
+    description:
+      name: file_magic_number
+      sha256: "106a540c015fe8583f06440491cb4e77b819d77e802af7f82a85ce67abe83e5e"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
   file_picker:
     dependency: "direct main"
     description:
@@ -408,6 +416,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.18.0"
+  mime:
+    dependency: transitive
+    description:
+      name: mime
+      sha256: "41a20518f0cb1256669420fdba0cd90d21561e560ac240f26ef8322e45bb7ed6"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.0"
   nested:
     dependency: transitive
     description:
@@ -449,7 +465,7 @@ packages:
     source: hosted
     version: "1.1.0"
   path_provider:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: path_provider
       sha256: a7f4874f987173da295a61c181b8ee71dab59b332a486b391babf26a1b884825
@@ -504,6 +520,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.12.0"
+  pdf_combiner:
+    dependency: "direct main"
+    description:
+      name: pdf_combiner
+      sha256: "3652b84b4c14470f1df307a9deab1c2a1089af8981fb5a0acfa5134128fa5986"
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.2.0"
   pdf_widget_wrapper:
     dependency: transitive
     description:
