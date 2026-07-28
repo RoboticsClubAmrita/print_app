@@ -27,7 +27,6 @@ class PrintServiceApp extends StatelessWidget {
         disableBarrierInteraction: true,
         scrollDuration: const Duration(milliseconds: 300),
         onFinish: () => TourCoordinator.onFinish?.call(),
-        onStart: (index, key) => TourCoordinator.onStart?.call(index ?? 0),
         builder: (context) => MaterialApp(
           title: 'PrintEase',
           debugShowCheckedModeBanner: false,

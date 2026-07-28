@@ -19,6 +19,9 @@ class AppNotification {
 
 /// Central app state backed by the print_backend REST API.
 class AppState extends ChangeNotifier {
+  /// Fixed jobId for the local-only onboarding demo order, so it can be
+  /// found and removed later without touching any real order.
+  static const String kDemoJobId = 'demo-job-001';
   AppUser? user;
   List<PrintOrder> orders = [];
   List<Map<String, dynamic>> locations = [];
@@ -455,5 +458,32 @@ class AppState extends ChangeNotifier {
     } catch (_) {
       return 'Could not reach the server. Check your connection.';
     }
+  }
+
+  // ---------------- Onboarding demo (local-only, no network) ----------------
+
+  /// Inserts a fake order for the onboarding walkthrough. Never touches
+  /// the backend — safe to call for any user, any number of times.
+  void injectDemoOrder(PrintOrder order) {
+    orders.insert(0, order);
+    notifyListeners();
+  }
+
+  /// Advances the demo order's status locally to simulate a successful
+  /// payment, without ever calling Razorpay or the API.
+  void markDemoOrderPaid() {
+    for (final o in orders) {
+      if (o.jobId == kDemoJobId) {
+        o.status = OrderStatus.queued;
+        break;
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Removes the demo order once the walkthrough ends.
+  void removeDemoOrder() {
+    orders.removeWhere((o) => o.jobId == kDemoJobId);
+    notifyListeners();
   }
 }
