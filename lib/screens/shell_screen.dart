@@ -14,7 +14,6 @@ import 'edit_profile_screen.dart';
 import 'home_screen.dart';
 import 'login_screen.dart';
 import 'orders_screen.dart';
-import 'walkthrough_screen.dart';
 import '../data/pricing.dart';
 
 class ShellScreen extends StatefulWidget {
@@ -606,22 +605,6 @@ class ProfileTabState extends State<ProfileTab> {
                   fontSize: 13,
                   color: AppColors.textSecondary,
                   height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 22),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: () {
-                    Navigator.of(sheetContext).pop();
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const WalkthroughScreen(replay: true),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.play_circle_outline_rounded, size: 20),
-                  label: const Text('View Demo'),
                 ),
               ),
             ],

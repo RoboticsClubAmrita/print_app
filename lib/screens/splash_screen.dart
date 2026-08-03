@@ -25,9 +25,6 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> _explore() async {
     setState(() => _checking = true);
 
-    // The onboarding walkthrough no longer gates first launch — go straight to
-    // session restore. It is still reachable from Profile -> About PrintEase ->
-    // View Demo, which pushes WalkthroughScreen(replay: true).
     final restored = await context.read<AppState>().restoreSession();
     if (!mounted) return;
     setState(() => _checking = false);

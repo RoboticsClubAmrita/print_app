@@ -56,17 +56,6 @@ class SessionStore {
     await _storage.delete(key: _rememberEmailKey);
   }
 
-  // ---------------- Onboarding walkthrough ----------------
-
-  static const _seenWalkthroughKey = 'seen_walkthrough';
-
-  /// True once the first-run "Explore Printing" walkthrough has been shown.
-  static Future<bool> get seenWalkthrough async =>
-      (await _storage.read(key: _seenWalkthroughKey)) == 'true';
-
-  static Future<void> markWalkthroughSeen() =>
-      _storage.write(key: _seenWalkthroughKey, value: 'true');
-
   // ---------------- Feature tours (arrow coach marks), one flag per tab -----
 
   /// True once the given tab's first-run coach-mark tour has been shown.

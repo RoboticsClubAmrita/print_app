@@ -462,7 +462,7 @@ class AppState extends ChangeNotifier {
 
   // ---------------- Onboarding demo (local-only, no network) ----------------
 
-  /// Inserts a fake order for the onboarding walkthrough. Never touches
+  /// Inserts a fake order for the guided demo. Never touches
   /// the backend — safe to call for any user, any number of times.
   void injectDemoOrder(PrintOrder order) {
     orders.insert(0, order);
@@ -481,7 +481,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Removes the demo order once the walkthrough ends.
+  /// Removes the demo order once the guided demo ends.
   void removeDemoOrder() {
     orders.removeWhere((o) => o.jobId == kDemoJobId);
     notifyListeners();
