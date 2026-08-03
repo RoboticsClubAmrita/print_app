@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../widgets/showcase_next_button.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -16,7 +15,9 @@ import '../widgets/fx.dart';
 /// Billing tab: dark statement card with an oversized total-due numeral,
 /// order-wise cost breakdown and payment history.
 class BillingTab extends StatefulWidget {
-  const BillingTab({super.key});
+  final bool demoMode;
+  final VoidCallback? onDemoComplete;
+  const BillingTab({super.key, this.demoMode = false, this.onDemoComplete});
 
   @override
   State<BillingTab> createState() => BillingTabState();
@@ -26,18 +27,6 @@ class BillingTabState extends State<BillingTab> {
   bool _paying = false;
   bool _payingDues = false;
   bool _breakdownExpanded = false;
-  final _tourTotalDue = GlobalKey();
-  final _tourPaymentHistory = GlobalKey();
-
-
-  // Every showcase step scrolls the page to bring its target into view
-  // before highlighting it, so a step lower down the page is always
-  // reachable regardless of scroll position when the tour starts.
-  static const _tourScrollDuration = Duration(milliseconds: 300);
-
-  /// Showcase keys in tour order, contributed to the single combined tour
-  /// list assembled by [ShellScreen._startFullTour].
-  List<GlobalKey> get tourKeys => [_tourTotalDue, _tourPaymentHistory];
 
   @override
   void initState() {
@@ -71,6 +60,22 @@ class BillingTabState extends State<BillingTab> {
   Future<void> _payAllDue(AppState state) async {
     if (_paying) return;
     setState(() => _paying = true);
+
+    if (widget.demoMode) {
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      if (!mounted) return;
+      state.markDemoOrderPaid();
+      await showSuccessOverlay(
+        context,
+        title: 'Payment Successful',
+        subtitle: 'Demo payment complete — you are all set.',
+        icon: Icons.account_balance_wallet_rounded,
+      );
+      if (mounted) setState(() => _paying = false);
+      widget.onDemoComplete?.call();
+      return;
+    }
+
     try {
       final unpaid = List<PrintOrder>.from(state.unpaidOrders);
       var cleared = 0;
@@ -143,20 +148,7 @@ class BillingTabState extends State<BillingTab> {
           const SizedBox(height: 20),
           FadeSlideIn(
             delay: const Duration(milliseconds: 90),
-            child: AppShowcase(
-              key: _tourTotalDue,
-              title: 'Total Due',
-              description:
-                  'Your outstanding balance across all unpaid orders, and a one-tap way to clear it.',
-              targetShapeBorder: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.all(Radius.circular(28)),
-              ),
-              enableAutoScroll: true,
-              tooltipActions: nextTooltipActions(context,
-                  step: 15, total: 18, tabIndex: 2, isFirstStepOfTab: true),
-              tooltipActionConfig: tooltipNextActionConfig,
-              child: _statementCard(context, state, unpaid.length),
-            ),
+            child: _statementCard(context, state, unpaid.length),
           ),
           if (state.outstandingDues > 0) ...[
             const SizedBox(height: 16),
@@ -224,57 +216,45 @@ class BillingTabState extends State<BillingTab> {
           const SizedBox(height: 14),
           FadeSlideIn(
             delay: const Duration(milliseconds: 240),
-            child: AppShowcase(
-              key: _tourPaymentHistory,
-              title: 'Payment History',
-              description:
-                  'Review your completed payments and cleared orders here.',
-              targetShapeBorder: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.all(Radius.circular(24)),
-              ),
-              enableAutoScroll: true,
-              tooltipActions: nextTooltipActions(context, step: 16, total: 18, tabIndex: 2),
-              tooltipActionConfig: tooltipNextActionConfig,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Payment History',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 12),
-                  if (paid.isEmpty)
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Payment History',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 12),
+                if (paid.isEmpty)
+                  FadeSlideIn(
+                    delay: const Duration(milliseconds: 280),
+                    child: Container(
+                      padding: const EdgeInsets.all(18),
+                      decoration: AppDecor.card(radius: 22),
+                      child: const Row(
+                        children: [
+                          Icon(
+                            Icons.receipt_long_outlined,
+                            size: 20,
+                            color: AppColors.textSecondary,
+                          ),
+                          SizedBox(width: 12),
+                          Text(
+                            'No payments yet.',
+                            style: TextStyle(color: AppColors.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  for (var i = 0; i < paid.length; i++) ...[
                     FadeSlideIn(
-                      delay: const Duration(milliseconds: 280),
-                      child: Container(
-                        padding: const EdgeInsets.all(18),
-                        decoration: AppDecor.card(radius: 22),
-                        child: const Row(
-                          children: [
-                            Icon(
-                              Icons.receipt_long_outlined,
-                              size: 20,
-                              color: AppColors.textSecondary,
-                            ),
-                            SizedBox(width: 12),
-                            Text(
-                              'No payments yet.',
-                              style: TextStyle(color: AppColors.textSecondary),
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                  else
-                    for (var i = 0; i < paid.length; i++) ...[
-                      FadeSlideIn(
-                        delay: Duration(milliseconds: 280 + 40 * (i < 6 ? i : 6)),
-                        child: _historyRow(paid[i]),
-                      ),
-                      const SizedBox(height: 10),
-                    ],
-                ],
-              ),
+                      delay: Duration(milliseconds: 280 + 40 * (i < 6 ? i : 6)),
+                      child: _historyRow(paid[i]),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+              ],
             ),
           ),
         ],

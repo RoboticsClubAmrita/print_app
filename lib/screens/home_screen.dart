@@ -17,17 +17,20 @@ import '../widgets/pill_toggle.dart';
 import 'order_detail_screen.dart';
 import 'print_preview_screen.dart';
 import '../widgets/showcase_next_button.dart';
+import 'package:printing/printing.dart';
 
 class HomeTab extends StatefulWidget {
   final VoidCallback onViewOrders;
   final VoidCallback onViewProfile;
   final GlobalKey bottomNavKey;
+  final bool demoMode;
 
   const HomeTab({
     super.key,
     required this.onViewOrders,
     required this.onViewProfile,
     required this.bottomNavKey,
+    this.demoMode = false,
   });
 
   @override
@@ -59,8 +62,6 @@ class HomeTabState extends State<HomeTab> {
 
   // ---------------- First-time feature tour ----------------
   final _tourLocation = GlobalKey();
-  final _tourNotifications = GlobalKey();
-  final _tourProfile = GlobalKey();
 
   final _tourToggle = GlobalKey();
   final _tourDocument = GlobalKey();
@@ -85,6 +86,22 @@ class HomeTabState extends State<HomeTab> {
       ? (_ratePerPage! * _selectedPageCount * _copies).round()
       : printCost(pages: _selectedPageCount, copies: _copies, side: _side);
 
+
+
+
+  /// Local, backend-free page count for the demo. PDFs are counted by
+  /// rasterizing at a very low DPI (fast, just for a page total); other
+  /// file types default to 1 since we can't parse them client-side.
+  Future<int> _detectPagesForDemo(Uint8List bytes, String extension) async {
+    if (extension != 'pdf') return 1;
+    try {
+      final count = await Printing.raster(bytes, dpi: 10).length;
+      return count > 0 ? count : 1;
+    } catch (_) {
+      return 1;
+    }
+  }
+
   Future<void> _loadRate() async {
     try {
       final rate = await ApiClient.pricingLookup(
@@ -103,8 +120,6 @@ class HomeTabState extends State<HomeTab> {
   /// mark is owned by [ShellScreen] itself and inserted right after these.
   List<GlobalKey> get tourKeys => [
         _tourLocation,
-        _tourNotifications,
-        _tourProfile,
         _tourToggle,
         _tourDocument,
         _tourPages,
@@ -172,12 +187,20 @@ class HomeTabState extends State<HomeTab> {
   @override
   void initState() {
     super.initState();
+    if (widget.demoMode) {
+      _ratePerPage = 2;
+      return;
+    }
     final state = context.read<AppState>();
     if (state.locations.isEmpty) state.loadLocations();
     _loadRate();
   }
 
   Future<void> _pickLocation() async {
+    if (widget.demoMode) {
+      context.read<AppState>().selectLocation('demo-loc', 'Main Library Stack');
+      return;
+    }
     final state = context.read<AppState>();
     if (state.locations.isEmpty) await state.loadLocations();
     if (!mounted) return;
@@ -305,15 +328,33 @@ class HomeTabState extends State<HomeTab> {
     setState(() => _picking = true);
     try {
       final result = await FilePicker.platform.pickFiles(
-  withData: true,
-  type: FileType.any,
-);
+        withData: true,
+        type: FileType.any,
+      );
       if (result != null && result.files.isNotEmpty && mounted) {
         final f = result.files.first;
         if (f.bytes == null) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Could not read that file')),
           );
+        } else if (widget.demoMode) {
+          setState(() {
+            _fileName = f.name;
+            _fileBytes = f.bytes;
+            _fileSizeKb = (f.size / 1024).ceil();
+            _fileId = null;
+            _detectedPages = null;
+            _selectedPages = null;
+            _uploading = true;
+          });
+          final ext = f.name.contains('.') ? f.name.split('.').last.toLowerCase() : '';
+          final pages = await _detectPagesForDemo(f.bytes!, ext);
+          if (!mounted) return;
+          setState(() {
+            _fileId = 'demo-file';
+            _detectedPages = pages;
+            _uploading = false;
+          });
         } else {
           setState(() {
             _fileName = f.name;
@@ -477,6 +518,38 @@ class HomeTabState extends State<HomeTab> {
     if (confirmed != true || !mounted) return;
 
     setState(() => _placing = true);
+
+    if (widget.demoMode) {
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      if (!mounted) return;
+      context.read<AppState>().injectDemoOrder(
+            PrintOrder(
+              id: 'DEMO-0001',
+              jobId: AppState.kDemoJobId,
+              fileName: _fileName!,
+              fileSizeKb: _fileSizeKb,
+              pages: _selectedPageCount,
+              copies: _copies,
+              side: _side,
+              createdAt: DateTime.now(),
+              scheduledAt: _scheduledAt ?? DateTime.now(),
+              scheduledNow: _scheduledAt == null,
+              status: OrderStatus.pending,
+              backendCost: _estimate,
+              selectedPages: _selectedPages,
+            ),
+          );
+      setState(() {
+        _resetDocument();
+        _copies = 1;
+        _sideIndex = 0;
+        _scheduledAt = null;
+        _placing = false;
+      });
+      widget.onViewOrders();
+      return;
+    }
+
     try {
       final order = await context.read<AppState>().placeOrder(
             fileId: _fileId!,
@@ -558,7 +631,7 @@ class HomeTabState extends State<HomeTab> {
                 borderRadius: BorderRadius.all(Radius.circular(24)),
               ),
               enableAutoScroll: true,
-              tooltipActions: nextTooltipActions(context, step: 11, total: 18),
+              tooltipActions: nextTooltipActions(context, step: 9, total: 10),
               tooltipActionConfig: tooltipNextActionConfig,
               child: _todaySection(state),
             ),
@@ -608,8 +681,8 @@ class HomeTabState extends State<HomeTab> {
                           borderRadius: BorderRadius.all(Radius.circular(24)),
                         ),
                         enableAutoScroll: true,
-                        tooltipActions: nextTooltipActions(context,
-                            step: 1, total: 18, tabIndex: 0, isFirstStepOfTab: true),
+                        tooltipActions:
+                            nextTooltipActions(context, step: 1, total: 10),
                         tooltipActionConfig: tooltipNextActionConfig,
                         child: Pressable(
                           onTap: _pickLocation,
@@ -644,61 +717,41 @@ class HomeTabState extends State<HomeTab> {
                         ),
                       ),
                       const Spacer(),
-                      AppShowcase(
-                        key: _tourNotifications,
-                        title: 'Stay in the Loop',
-                        description:
-                            'Order updates land here — queued, printing, ready, collected.',
-                        targetShapeBorder: const CircleBorder(),
-                        enableAutoScroll: true,
-                        tooltipActions: nextTooltipActions(context, step: 2, total: 18, tabIndex: 0),
-                        tooltipActionConfig: tooltipNextActionConfig,
-                        child: Pressable(
-                          onTap: _showNotifications,
-                          child: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.08),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white24, width: 1.5),
-                            ),
-                            child: const Icon(
-                              Icons.notifications_none_rounded,
-                              color: AppColors.white,
-                              size: 22,
-                            ),
+                      Pressable(
+                        onTap: _showNotifications,
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white24, width: 1.5),
+                          ),
+                          child: const Icon(
+                            Icons.notifications_none_rounded,
+                            color: AppColors.white,
+                            size: 22,
                           ),
                         ),
                       ),
                       const SizedBox(width: 10),
-                      AppShowcase(
-                        key: _tourProfile,
-                        title: 'Your Profile',
-                        description:
-                            'View your order history and account details anytime.',
-                        targetShapeBorder: const CircleBorder(),
-                        enableAutoScroll: true,
-                        tooltipActions: nextTooltipActions(context, step: 3, total: 18, tabIndex: 0),
-                        tooltipActionConfig: tooltipNextActionConfig,
-                        child: Pressable(
-                          onTap: widget.onViewProfile,
-                          child: Container(
-                            padding: const EdgeInsets.all(2),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white24, width: 1.5),
-                            ),
-                            child: CircleAvatar(
-                              radius: 20,
-                              backgroundColor: AppColors.white,
-                              child: Text(
-                                context.watch<AppState>().user?.initials ?? '?',
-                                style: const TextStyle(
-                                  color: AppColors.black,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 15,
-                                ),
+                      Pressable(
+                        onTap: widget.onViewProfile,
+                        child: Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white24, width: 1.5),
+                          ),
+                          child: CircleAvatar(
+                            radius: 20,
+                            backgroundColor: AppColors.white,
+                            child: Text(
+                              context.watch<AppState>().user?.initials ?? '?',
+                              style: const TextStyle(
+                                color: AppColors.black,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 15,
                               ),
                             ),
                           ),
@@ -802,7 +855,7 @@ class HomeTabState extends State<HomeTab> {
               borderRadius: BorderRadius.all(Radius.circular(30)),
             ),
             enableAutoScroll: true,
-            tooltipActions: nextTooltipActions(context, step: 4, total: 18, tabIndex: 0),
+            tooltipActions: nextTooltipActions(context, step: 2, total: 10),
             tooltipActionConfig: tooltipNextActionConfig,
             child: PillToggle(
               options: const ['Single-sided', 'Double-sided'],
@@ -814,6 +867,30 @@ class HomeTabState extends State<HomeTab> {
             ),
           ),
           const SizedBox(height: 14),
+          if (widget.demoMode && _fileName == null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.chip,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.black, width: 1),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.touch_app_rounded, size: 18, color: AppColors.black),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Upload a file from your device to start the demo',
+                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           AppShowcase(
             key: _tourDocument,
             title: 'Upload Your Document',
@@ -823,7 +900,7 @@ class HomeTabState extends State<HomeTab> {
               borderRadius: BorderRadius.all(Radius.circular(22)),
             ),
             enableAutoScroll: true,
-            tooltipActions: nextTooltipActions(context, step: 5, total: 18, tabIndex: 0),
+            tooltipActions: nextTooltipActions(context, step: 3, total: 10),
             tooltipActionConfig: tooltipNextActionConfig,
             child: AnimatedGlowBorder(
               active: _uploading,
@@ -863,7 +940,7 @@ class HomeTabState extends State<HomeTab> {
                     borderRadius: BorderRadius.all(Radius.circular(22)),
                   ),
                   enableAutoScroll: true,
-                  tooltipActions: nextTooltipActions(context, step: 6, total: 18, tabIndex: 0),
+                  tooltipActions: nextTooltipActions(context, step: 4, total: 10),
                   tooltipActionConfig: tooltipNextActionConfig,
                   child: FieldChip(
                     label: 'Pages',
@@ -890,7 +967,7 @@ class HomeTabState extends State<HomeTab> {
                     borderRadius: BorderRadius.all(Radius.circular(22)),
                   ),
                   enableAutoScroll: true,
-                  tooltipActions: nextTooltipActions(context, step: 7, total: 18, tabIndex: 0),
+                  tooltipActions: nextTooltipActions(context, step: 5, total: 10),
                   tooltipActionConfig: tooltipNextActionConfig,
                   child: StepperChip(
                     label: 'Copies',
@@ -926,7 +1003,7 @@ class HomeTabState extends State<HomeTab> {
               borderRadius: BorderRadius.all(Radius.circular(22)),
             ),
             enableAutoScroll: true,
-            tooltipActions: nextTooltipActions(context, step: 8, total: 18, tabIndex: 0),
+            tooltipActions: nextTooltipActions(context, step: 6, total: 10),
             tooltipActionConfig: tooltipNextActionConfig,
             child: FieldChip(
               label: 'Print Time',
@@ -945,7 +1022,7 @@ class HomeTabState extends State<HomeTab> {
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(20)),
             ),
-            tooltipActions: nextTooltipActions(context, step: 9, total: 18, tabIndex: 0),
+            tooltipActions: nextTooltipActions(context, step: 7, total: 10),
             tooltipActionConfig: tooltipNextActionConfig,
             child: Container(
               padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
@@ -1014,7 +1091,7 @@ class HomeTabState extends State<HomeTab> {
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(16)),
             ),
-            tooltipActions: nextTooltipActions(context, step: 10, total: 18, tabIndex: 0),
+            tooltipActions: nextTooltipActions(context, step: 8, total: 10),
             tooltipActionConfig: tooltipNextActionConfig,
             child: FilledButton(
               onPressed: (_placing || _uploading) ? null : _placeOrder,

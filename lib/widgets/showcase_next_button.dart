@@ -10,8 +10,6 @@ List<TooltipActionButton> nextTooltipActions(
   BuildContext context, {
   required int step,
   required int total,
-  int? tabIndex,
-  bool isFirstStepOfTab = false,
 }) {
   final showBack = step > 1;
 
@@ -77,21 +75,15 @@ const tooltipNextActionConfig = TooltipActionConfig(
   gapBetweenContentAndAction: 10,
 );
 
-/// Lets the app-level `ShowCaseWidget`'s `onFinish`/`onStart` callbacks (set
-/// once in `main.dart`) notify whichever screen owns the tour (`ShellScreen`)
-/// that a step started or the whole tour finished — without threading a
-/// callback through the widget tree.
+/// Lets the app-level `ShowCaseWidget`'s `onFinish` callback (set once in
+/// `main.dart`) notify whichever screen owns the tour (`ShellScreen`) that
+/// the tour finished — without threading a callback through the widget tree.
 class TourCoordinator {
   static VoidCallback? onFinish;
 
-  /// Called every time a showcase step starts (including the first),
-  /// with that step's index in the single app-wide tour list. [ShellScreen]
-  /// uses this to switch to whichever tab owns that step.
-  static void Function(int index)? onStart;
-
-  /// Total coach-mark steps across the whole app (single combined list).
-  /// Update this if you add/remove Showcase steps anywhere.
-  static const int totalSteps = 18;
+  /// Total coach-mark steps in the first-login tour (Home tab + the
+  /// bottom nav pill). Update this if you add/remove Showcase steps there.
+  static const int totalSteps = 10;
 }
 
 /// Drop-in replacement for [Showcase] that fixes two app-wide issues:
