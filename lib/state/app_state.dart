@@ -138,7 +138,7 @@ class AppState extends ChangeNotifier {
   /// Returns null on success, or an error message.
   Future<String?> login(String email, String password) async {
     if (email.trim().isEmpty || password.isEmpty) {
-      return 'Enter your email and password';
+      return 'Enter your college ID and password';
     }
     try {
       final res = await ApiClient.login(email.trim(), password);
@@ -338,6 +338,48 @@ class AppState extends ChangeNotifier {
     final fileId = registered['fileId'].toString();
     _heldDocuments[fileId] = (bytes: document.bytes, fileName: document.fileName);
     return fileId;
+  }
+
+  /// Registers the document and hands the PDF over straight away, before any
+  /// job exists and before anything is charged.
+  ///
+  /// The upload is what makes the price trustworthy: the backend counts the
+  /// real document and answers with the count the order will be billed on, so
+  /// the figure this app showed while the user was setting things up can never
+  /// be the one they are charged for.
+  ///
+  /// Throws [ApiException] if the document could not be delivered — there is
+  /// no order and no charge in that case, and the PDF is still on this device.
+  Future<({String fileId, int totalPages, bool pagesCorrected})> registerAndUploadDocument(
+    PreparedDocument document,
+  ) async {
+    final fileId = await registerDocument(document);
+
+    try {
+      final res = await ApiClient.uploadDocumentContent(
+        fileId: fileId,
+        bytes: document.bytes,
+        filename: document.fileName,
+      );
+      _heldDocuments.remove(fileId);
+
+      final serverPages = res['totalPages'];
+      final counted = serverPages is int
+          ? serverPages
+          : int.tryParse('$serverPages') ?? document.totalPages;
+
+      return (
+        fileId: fileId,
+        totalPages: counted,
+        pagesCorrected: res['pagesCorrected'] == true || counted != document.totalPages,
+      );
+    } catch (_) {
+      // The registration is abandoned — the cleanup job drops a row whose
+      // document never arrived. Holding the bytes for a retry would deliver a
+      // document no order will ever point at.
+      _heldDocuments.remove(fileId);
+      rethrow;
+    }
   }
 
   /// Sends a held document now that its order is paid for.

@@ -13,6 +13,7 @@ import '../data/pricing.dart';
 import '../models/print_order.dart';
 import '../services/api_client.dart';
 import '../services/document_prep.dart';
+import '../services/word_document.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/page_range.dart';
@@ -54,7 +55,10 @@ class HomeTabState extends State<HomeTab> {
   Uint8List? _fileBytes;
   List<PlatformFile> _selectedSourceFiles = [];
   int _fileSizeKb = 0;
-  String? _fileId;
+  /// The merged PDF, counted and fingerprinted on this device. Held here
+  /// until the user actually places the order — nothing is registered with
+  /// the backend before that.
+  PreparedDocument? _prepared;
   int? _detectedPages;
   List<int>? _selectedPages; // null = every page
   int _copies = 1;
@@ -441,7 +445,6 @@ class HomeTabState extends State<HomeTab> {
               _fileName = f.name;
               _fileBytes = f.bytes;
               _fileSizeKb = (f.size / 1024).ceil();
-              _fileId = null;
               _detectedPages = null;
               _selectedPages = null;
               _uploading = true;
@@ -450,7 +453,6 @@ class HomeTabState extends State<HomeTab> {
             final pages = await _detectPagesForDemo(f.bytes!, ext);
             if (!mounted) return;
             setState(() {
-              _fileId = 'demo-file';
               _detectedPages = pages;
               _uploading = false;
             });
@@ -495,7 +497,7 @@ class HomeTabState extends State<HomeTab> {
       if (!mounted) return;
       if (files.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('The selected folder has no supported documents.')),
+          SnackBar(content: Text('The selected folder has no $printableFormatsLabel files.')),
         );
         return;
       }
@@ -547,7 +549,6 @@ class HomeTabState extends State<HomeTab> {
     setState(() {
       _selectedSourceFiles = readableFiles;
       _fileName = readableFiles.length == 1 ? readableFiles.first.name : 'combined-documents.pdf';
-      _fileId = null;
       _detectedPages = null;
       _selectedPages = null;
     });
@@ -561,13 +562,29 @@ class HomeTabState extends State<HomeTab> {
       Uint8List finalBytes;
       String finalName;
 
-      if (_selectedSourceFiles.length == 1 && _selectedSourceFiles.first.name.toLowerCase().endsWith('.pdf')) {
-        finalBytes = _selectedSourceFiles.first.bytes!;
-        finalName = _selectedSourceFiles.first.name;
+      // Word documents become PDF pages here first — the merger only speaks
+      // PDF and image, and this is the one place a page layout is decided.
+      final converted = <PlatformFile>[];
+      for (final file in _selectedSourceFiles) {
+        if (!isWordDocument(file.name)) {
+          converted.add(file);
+          continue;
+        }
+        final pdfBytes = await wordDocumentToPdf(bytes: file.bytes!, fileName: file.name);
+        converted.add(PlatformFile(
+          name: '${file.name}.pdf',
+          size: pdfBytes.length,
+          bytes: pdfBytes,
+        ));
+      }
+
+      if (converted.length == 1 && converted.first.name.toLowerCase().endsWith('.pdf')) {
+        finalBytes = converted.first.bytes!;
+        finalName = converted.first.name;
       } else {
         final tempDirectory = await getTemporaryDirectory();
         final outputPath = '${tempDirectory.path}${Platform.pathSeparator}combined-documents-${DateTime.now().millisecondsSinceEpoch}.pdf';
-        final inputs = _selectedSourceFiles.map((file) => MergeInput.bytes(file.bytes!)).toList();
+        final inputs = converted.map((file) => MergeInput.bytes(file.bytes!)).toList();
         final generatedPath = await PdfCombiner.generatePDFFromDocuments(inputs: inputs, outputPath: outputPath);
         finalBytes = await File(generatedPath).readAsBytes();
         finalName = 'combined-documents.pdf';
@@ -585,13 +602,24 @@ class HomeTabState extends State<HomeTab> {
         _fileBytes = prepared.bytes;
         _fileSizeKb = prepared.sizeKb;
         _detectedPages = prepared.totalPages;
+        _prepared = prepared;
       });
-      await _registerPrepared(prepared);
-    } on PageDetectionException catch (e) {
+    } on WordDocumentException catch (e) {
+      if (mounted) {
+        _resetDocument();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } on PageDetectionException {
       if (mounted) {
         _resetDocument();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Uploading failed — ${e.message}. Try re-saving it as a PDF.')),
+          const SnackBar(
+            content: Text(
+              'Upload failed — page detection failed. We could not count the pages in this '
+              'document, and we will not guess at a number you would be charged for. '
+              'Please upload a PDF instead.',
+            ),
+          ),
         );
       }
     } on DocumentPrepException catch (e) {
@@ -611,27 +639,40 @@ class HomeTabState extends State<HomeTab> {
     }
   }
 
-  /// Tells the backend what we are about to print — name, size, sha256 and
-  /// page count — so the order can be priced. The PDF itself stays on this
-  /// device and is only sent once the order has been paid for.
-  Future<void> _registerPrepared(PreparedDocument prepared) async {
+  /// Hands the prepared document to the backend: registers it, uploads the
+  /// PDF, and comes back with the page count the order will be priced on.
+  ///
+  /// This is the first time the backend hears about the document, and it only
+  /// runs when the user places the order — picking, converting, counting and
+  /// previewing all happen on this device with nothing sent anywhere. If it
+  /// fails there is no order and no charge, and the document is still here.
+  ///
+  /// Returns null if it could not be delivered (the reason is shown).
+  Future<({String fileId, int totalPages, bool pagesCorrected})?> _registerAndUpload(
+    PreparedDocument prepared,
+  ) async {
     final state = context.read<AppState>();
-    if (!mounted) return;
 
     try {
-      final fileId = await state.registerDocument(prepared);
-      if (!mounted) return;
-      setState(() => _fileId = fileId);
+      final registered = await state.registerAndUploadDocument(prepared);
+      if (!mounted) return null;
+      return registered;
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
       }
+      return null;
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not reach the print server. Check your connection and try again.')),
+          const SnackBar(
+            content: Text(
+              'Could not send your document to the print server. Nothing was charged — check your connection and try again.',
+            ),
+          ),
         );
       }
+      return null;
     }
   }
 
@@ -644,7 +685,7 @@ class HomeTabState extends State<HomeTab> {
     _fileName = null;
     _fileBytes = null;
     _fileSizeKb = 0;
-    _fileId = null;
+    _prepared = null;
     _detectedPages = null;
     _selectedPages = null;
   }
@@ -721,7 +762,9 @@ class HomeTabState extends State<HomeTab> {
       );
       return;
     }
-    if (_uploading || _fileId == null || _detectedPages == null) {
+    // Demo mode never prepares a real document, so it is exempt from the
+    // prepared-PDF requirement the live flow places the order against.
+    if (_uploading || _detectedPages == null || (!widget.demoMode && _prepared == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Still counting pages — try again in a moment')),
       );
@@ -783,14 +826,42 @@ class HomeTabState extends State<HomeTab> {
     }
 
     try {
+      // First contact with the backend: register the document prepared
+      // locally and hand over the PDF, so the order is priced on a page count
+      // the server took itself. If this fails there is no half-made order to
+      // clean up — the user is told and the document is still here.
+      final registered = await _registerAndUpload(_prepared!);
+      if (registered == null || !mounted) return;
+
+      // Our own count decided which pages the user could pick. If the server
+      // read the document differently, a selection running past its last page
+      // would be rejected, so it is trimmed to what the document really has.
+      final serverPages = registered.totalPages;
+      var pages = _selectedPages;
+      if (pages != null) {
+        final inRange = pages.where((p) => p >= 1 && p <= serverPages).toList();
+        pages = inRange.isEmpty ? null : inRange;
+      }
+
       final order = await context.read<AppState>().placeOrder(
-            fileId: _fileId!,
-            pages: _selectedPageCount,
+            fileId: registered.fileId,
+            pages: pages?.length ?? serverPages,
             copies: _copies,
             side: _side,
-            selectedPages: _selectedPages,
+            selectedPages: pages,
             scheduledFor: _scheduledAt,
           );
+
+      if (registered.pagesCorrected && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'This document has $serverPages page${serverPages == 1 ? '' : 's'} — '
+              'your total was recalculated to match it.',
+            ),
+          ),
+        );
+      }
       if (!mounted) return;
       setState(() {
         _resetDocument();
@@ -1153,6 +1224,19 @@ class HomeTabState extends State<HomeTab> {
                       child: _RemoveDocumentButton(onTap: _removeDocument),
                     ),
                 ],
+              ),
+            ),
+          ),
+          // Say what can be picked, and that the conversion and page count
+          // happen here rather than on the server.
+          Padding(
+            padding: const EdgeInsets.only(top: 8, left: 4),
+            child: Text(
+              '$printableFormatsLabel · combined into one PDF and counted on this device',
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),

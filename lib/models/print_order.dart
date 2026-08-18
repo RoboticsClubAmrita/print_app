@@ -72,6 +72,12 @@ class PrintOrder {
   /// True once the document has actually been uploaded, so it can be read back
   /// from the server. Null/false means it still lives only on this device.
   final bool documentStored;
+
+  /// Whether the document can be opened right now. The backend decides this:
+  /// it knows whether the file still exists and whether the 24-hour
+  /// post-collection window has closed, neither of which is visible from
+  /// [documentStored] alone. This is what the preview button is gated on.
+  final bool documentAvailable;
   final String fileName;
   final int fileSizeKb;
   final int pages;
@@ -117,6 +123,7 @@ class PrintOrder {
     this.jobId = '',
     this.fileId = '',
     this.documentStored = false,
+    this.documentAvailable = false,
     required this.fileName,
     required this.fileSizeKb,
     required this.pages,
@@ -150,6 +157,10 @@ class PrintOrder {
       jobId: (job['_id'] ?? '').toString(),
       fileId: (job['fileId'] ?? '').toString(),
       documentStored: (job['fileUploadStatus']?.toString() ?? '') == 'STORED',
+      // Falls back to fileUrl so this still behaves against an older backend
+      // that doesn't send fileIsViewable.
+      documentAvailable: job['fileIsViewable'] == true ||
+          (job['fileIsViewable'] == null && (job['fileUrl']?.toString().isNotEmpty ?? false)),
       fileName: (job['originalName'] ?? 'Document').toString(),
       fileSizeKb: 0,
       pages: (job['totalPagesToPrint'] as num?)?.toInt() ?? 0,

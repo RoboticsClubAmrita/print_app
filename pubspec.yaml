@@ -25,6 +25,10 @@ dependencies:
   showcaseview: ^5.0.2
   pdf_combiner: ^6.2.0
   path_provider: ^2.1.5
+  # Reads .xlsx workbooks so they can be laid out as PDF pages on the device.
+  pdf: ^3.12.0
+  archive: ^4.0.9
+  xml: ^7.0.1
 
 dev_dependencies:
   flutter_test:

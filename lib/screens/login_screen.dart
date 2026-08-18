@@ -33,7 +33,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _loadSavedCredentials() async {
-    // We never store the raw password; "remember me" only pre-fills the email
+    // We never store the raw password; "remember me" only pre-fills the college ID
     // and keeps the secure token session alive across restarts.
     final email = await SessionStore.savedEmail;
     if (!mounted || email == null || email.isEmpty) return;
@@ -77,7 +77,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _socialLoginUnavailable(String provider) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$provider sign-in is not available yet — use email and password.')),
+      SnackBar(content: Text('$provider sign-in is not available yet — use your college ID and password.')),
     );
   }
 
@@ -231,13 +231,17 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 22),
                       TextField(
                         controller: _email,
-                        keyboardType: TextInputType.emailAddress,
+                        // The backend matches this against college_id or
+                        // email, so it stays a plain text field — an email
+                        // keyboard would fight a roll number.
+                        keyboardType: TextInputType.text,
+                        textCapitalization: TextCapitalization.characters,
                         style: AppTheme.fieldTextStyle,
                         decoration: AppTheme.fieldDecoration(
-                          label: 'Email',
-                          hint: 'you@example.com',
+                          label: 'College ID',
+                          hint: 'CB.SC.U4XXXXXX',
                           prefixIcon: const Icon(
-                            Icons.mail_outline_rounded,
+                            Icons.badge_outlined,
                             color: AppColors.black,
                             size: 20,
                           ),

@@ -21,18 +21,26 @@ import 'package:printing/printing.dart';
 
 /// Extensions the picker offers.
 ///
-/// Word/PowerPoint/Excel are deliberately absent: converting them faithfully
-/// on a phone isn't something we can do, and an approximate conversion means
-/// the printout doesn't match the preview and the page count is wrong. Users
-/// export to PDF first and get an exact preview and price.
-const kPrintableExtensions = ['pdf', 'jpg', 'jpeg', 'png'];
+/// Word documents are re-laid-out here (see `word_document.dart`) rather than
+/// reproducing Word's own pagination, which depends on fonts and layout rules
+/// the file doesn't carry. The PDF built here is what gets previewed, counted,
+/// priced and printed, so those can't disagree — but it will not look
+/// identical to the same file opened in Word.
+const kPrintableExtensions = ['pdf', 'docx', 'jpg', 'jpeg', 'png'];
+
+/// What to show the user as the accepted formats.
+///
+/// Built from [kPrintableExtensions] rather than written out, so the list on
+/// screen can never drift from the list the picker actually enforces.
+String get printableFormatsLabel =>
+    kPrintableExtensions.map((e) => e.toUpperCase()).join(' · ');
 
 /// Formats we recognise but can't convert here, mapped to what to call them.
 const _convertYourself = <String, String>{
-  'doc': 'Word',
-  'docx': 'Word',
   'ppt': 'PowerPoint',
   'pptx': 'PowerPoint',
+  // .doc is the pre-2007 binary format; .docx is handled directly.
+  'doc': 'legacy Word',
   'xls': 'Excel',
   'xlsx': 'Excel',
   'txt': 'text',
@@ -64,13 +72,16 @@ String extensionOf(String fileName) {
 
 bool isPrintable(String fileName) => kPrintableExtensions.contains(extensionOf(fileName));
 
+/// True for formats this device turns into PDF pages itself.
+bool isWordDocument(String fileName) => extensionOf(fileName) == 'docx';
+
 /// The message to show for a file we cannot turn into a PDF on the device.
 String unsupportedFileMessage(String fileName) {
   final label = _convertYourself[extensionOf(fileName)];
   return label != null
       ? '$fileName is a $label document. Save it as a PDF first — that way the preview, '
           'the page count and the printout all match exactly.'
-      : '$fileName is not a supported file type. Choose a PDF, JPG or PNG.';
+      : '$fileName is not a supported file type. Choose one of: $printableFormatsLabel.';
 }
 
 /// Throws if any picked file can't become a PDF here. Called before merging so

@@ -230,24 +230,53 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     );
   }
 
-  /// Opens the order's own document. Before payment it comes from the copy
-  /// still held on this device; afterwards from the print server, which keeps
-  /// it readable to its owner until 24 hours after collection.
+  /// Opens the order's own document, read back from the print server, which
+  /// keeps it readable to its owner until 24 hours after collection.
+  ///
+  /// The button is always present so the preview is a visible part of an
+  /// order rather than something that quietly disappears; it is disabled, with
+  /// the reason underneath, once the document is gone.
   Widget _viewDocumentButton(PrintOrder order) {
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => DocumentViewerScreen(order: order)),
+    final available = order.documentAvailable ||
+        // A copy still held on this device is readable even if the server has
+        // not confirmed it yet.
+        context.read<AppState>().heldDocumentBytes(order.fileId) != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: available
+                ? () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => DocumentViewerScreen(order: order)),
+                    )
+                : null,
+            icon: const Icon(Icons.visibility_outlined, size: 18),
+            label: const Text('View document'),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              side: const BorderSide(color: AppColors.border),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+          ),
         ),
-        icon: const Icon(Icons.visibility_outlined, size: 18),
-        label: const Text('View document'),
-        style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          side: const BorderSide(color: AppColors.border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        ),
-      ),
+        if (!available)
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 4),
+            child: Text(
+              order.fileId.isEmpty
+                  ? 'There is no document on this order.'
+                  : 'This document has been deleted — documents are kept until 24 hours after collection.',
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+      ],
     );
   }
 
