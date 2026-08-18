@@ -5,12 +5,12 @@ import 'package:provider/provider.dart';
 import '../data/pricing.dart';
 import '../models/print_order.dart';
 import '../services/api_client.dart';
-import '../services/razorpay_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fx.dart';
 import '../widgets/status_chip.dart';
 import '../widgets/ticket_card.dart';
+import 'document_viewer_screen.dart';
 import 'otp_verification_screen.dart';
 
 class OrderDetailScreen extends StatefulWidget {
@@ -30,22 +30,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     setState(() => _busy = true);
     final state = context.read<AppState>();
     try {
-      final created = await ApiClient.createPaymentOrder(order.jobId);
-      final result = await RazorpayService.checkout(
-        keyId: created['keyId'].toString(),
-        orderId: created['orderId'].toString(),
-        amountInPaise: (created['amountInPaise'] as num).toInt(),
-        name: state.user?.name ?? 'PrintEase User',
-        description: 'Print job ${order.id}',
-        userEmail: state.user?.email,
-        userPhone: state.user?.phone,
-      );
-      await ApiClient.verifyPayment(
-        razorpayOrderId: result.orderId,
-        razorpayPaymentId: result.paymentId,
-        razorpaySignature: result.signature,
-      );
-      await state.refreshOrders();
+      // Pays and then sends the document this order has been holding on the
+      // device since it was placed — see AppState.payForOrder.
+      final uploadProblem = await state.payForOrder(order);
       if (!mounted) return;
       await showSuccessOverlay(
         context,
@@ -53,6 +40,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         subtitle: '${rupees(order.cost)} paid for ${order.fileName}.',
         icon: Icons.account_balance_wallet_rounded,
       );
+      if (uploadProblem != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(uploadProblem)),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -207,6 +199,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
                 children: [
                   FadeSlideIn(child: _summaryTicket(order)),
+                  if (order.fileId.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    FadeSlideIn(
+                      delay: const Duration(milliseconds: 35),
+                      child: _viewDocumentButton(order),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   FadeSlideIn(
                     delay: const Duration(milliseconds: 70),
@@ -226,6 +225,27 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Opens the order's own document. Before payment it comes from the copy
+  /// still held on this device; afterwards from the print server, which keeps
+  /// it readable to its owner until 24 hours after collection.
+  Widget _viewDocumentButton(PrintOrder order) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => DocumentViewerScreen(order: order)),
+        ),
+        icon: const Icon(Icons.visibility_outlined, size: 18),
+        label: const Text('View document'),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          side: const BorderSide(color: AppColors.border),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
       ),
     );

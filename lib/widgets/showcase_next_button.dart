@@ -81,6 +81,17 @@ const tooltipNextActionConfig = TooltipActionConfig(
 class TourCoordinator {
   static VoidCallback? onFinish;
 
+  /// Set by `ShellScreen`; invoked from Profile -> About PrintEase to run the
+  /// walkthrough again from step 1. Null when no shell is mounted.
+  static VoidCallback? onReplay;
+
+  /// Fired as each coach mark begins, so the screen that owns the scroll view
+  /// can bring the target into view itself. The package's own auto-scroll
+  /// cannot: it positions by layout, and the order form is painted 46px above
+  /// where it lays out (a `Transform.translate`), so its scroll landed short
+  /// and visibly corrected itself on the mid-form steps.
+  static void Function(GlobalKey key)? onStepStart;
+
   /// Total coach-mark steps in the first-login tour (Home tab + the
   /// bottom nav pill). Update this if you add/remove Showcase steps there.
   static const int totalSteps = 10;
@@ -99,7 +110,6 @@ class AppShowcase extends Showcase {
     super.title,
     super.description,
     super.targetShapeBorder,
-    super.enableAutoScroll,
     super.tooltipActions,
     super.tooltipActionConfig,
   }) : super(

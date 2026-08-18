@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import '../data/pricing.dart';
 import '../models/print_order.dart';
 import '../services/api_client.dart';
-import '../services/razorpay_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dot_grid.dart';
@@ -78,25 +77,14 @@ class OrdersTabState extends State<OrdersTab> {
     try {
       final unpaid = List<PrintOrder>.from(state.unpaidOrders);
       var cleared = 0;
+      final undelivered = <String>[];
       for (final order in unpaid) {
-        final created = await ApiClient.createPaymentOrder(order.jobId);
-        final result = await RazorpayService.checkout(
-          keyId: created['keyId'].toString(),
-          orderId: created['orderId'].toString(),
-          amountInPaise: (created['amountInPaise'] as num).toInt(),
-          name: state.user?.name ?? 'PrintEase User',
-          description: 'Print job ${order.id}',
-          userEmail: state.user?.email,
-          userPhone: state.user?.phone,
-        );
-        await ApiClient.verifyPayment(
-          razorpayOrderId: result.orderId,
-          razorpayPaymentId: result.paymentId,
-          razorpaySignature: result.signature,
-        );
+        // Pays and then sends the document each order has been holding on this
+        // device since it was placed — see AppState.payForOrder.
+        final problem = await state.payForOrder(order);
+        if (problem != null) undelivered.add('${order.fileName}: $problem');
         cleared += order.cost;
       }
-      await state.refreshOrders();
       if (!mounted) return;
       await showSuccessOverlay(
         context,
@@ -104,6 +92,11 @@ class OrdersTabState extends State<OrdersTab> {
         subtitle: '${rupees(cleared)} cleared — you are all set.',
         icon: Icons.account_balance_wallet_rounded,
       );
+      if (undelivered.isNotEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Still sending: ${undelivered.join('; ')}')),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

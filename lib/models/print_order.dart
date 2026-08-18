@@ -64,6 +64,14 @@ class PrintOrder {
 
   /// Mongo `_id` of the job — required for cancel/collect/payment API calls.
   final String jobId;
+
+  /// Backend document id. The key for both the copy still held on this device
+  /// (order placed, payment not yet settled) and `/api/files/<id>/content`.
+  final String fileId;
+
+  /// True once the document has actually been uploaded, so it can be read back
+  /// from the server. Null/false means it still lives only on this device.
+  final bool documentStored;
   final String fileName;
   final int fileSizeKb;
   final int pages;
@@ -107,6 +115,8 @@ class PrintOrder {
   PrintOrder({
     required this.id,
     this.jobId = '',
+    this.fileId = '',
+    this.documentStored = false,
     required this.fileName,
     required this.fileSizeKb,
     required this.pages,
@@ -138,6 +148,8 @@ class PrintOrder {
     return PrintOrder(
       id: (job['referenceId'] ?? job['_id'] ?? '').toString(),
       jobId: (job['_id'] ?? '').toString(),
+      fileId: (job['fileId'] ?? '').toString(),
+      documentStored: (job['fileUploadStatus']?.toString() ?? '') == 'STORED',
       fileName: (job['originalName'] ?? 'Document').toString(),
       fileSizeKb: 0,
       pages: (job['totalPagesToPrint'] as num?)?.toInt() ?? 0,

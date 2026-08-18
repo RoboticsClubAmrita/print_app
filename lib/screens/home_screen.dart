@@ -12,6 +12,7 @@ import 'package:provider/provider.dart';
 import '../data/pricing.dart';
 import '../models/print_order.dart';
 import '../services/api_client.dart';
+import '../services/document_prep.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/page_range.dart';
@@ -22,7 +23,6 @@ import '../widgets/pill_toggle.dart';
 import 'order_detail_screen.dart';
 import 'print_preview_screen.dart';
 import '../widgets/showcase_next_button.dart';
-import 'package:printing/printing.dart';
 
 class HomeTab extends StatefulWidget {
   final VoidCallback onViewOrders;
@@ -44,7 +44,10 @@ class HomeTab extends StatefulWidget {
 
 /// Extensions the backend's upload filter accepts (see
 /// print_backend/utils/uploadHelper.js) — PDFs, Word docs, and images.
-const _kPrintableExtensions = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'];
+/// Formats the picker offers. Word/PowerPoint are absent on purpose — see
+/// document_prep.dart: a phone can't convert them faithfully, and an
+/// approximate conversion means the preview, page count and printout disagree.
+const _kPrintableExtensions = kPrintableExtensions;
 
 class HomeTabState extends State<HomeTab> {
   String? _fileName;
@@ -84,6 +87,43 @@ class HomeTabState extends State<HomeTab> {
   // the tour starts.
   static const _tourScrollDuration = Duration(milliseconds: 300);
 
+  final _scrollController = ScrollController();
+
+  /// Bring a coach-mark target into view for the tour.
+  ///
+  /// The package's own `enableAutoScroll` is off because it positions by
+  /// *layout*, and the order form is painted 46px above where it lays out
+  /// (`Transform.translate` in [build]). That mismatch is what made the
+  /// mid-form steps scroll into place and then visibly correct themselves.
+  ///
+  /// `localToGlobal` reports the *painted* position — it walks the same
+  /// transforms the highlight does — so measuring with it keeps the scroll
+  /// and the spotlight in agreement no matter what offsets the layout uses.
+  Future<void> scrollTourTargetIntoView(GlobalKey key) async {
+    final ctx = key.currentContext;
+    if (ctx == null || !_scrollController.hasClients) return;
+
+    final box = ctx.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+
+    final position = _scrollController.position;
+    final paintedTop = box.localToGlobal(Offset.zero).dy;
+    final viewport = position.viewportDimension;
+
+    // Centre the target, but never fight the ends of the list.
+    final desiredTop = (viewport - box.size.height) / 2;
+    final target = (position.pixels + (paintedTop - desiredTop))
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+
+    if ((target - position.pixels).abs() < 1) return;
+
+    await _scrollController.animateTo(
+      target,
+      duration: _tourScrollDuration,
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   PrintSide get _side => _sideIndex == 0 ? PrintSide.single : PrintSide.double;
 
   int get _selectedPageCount => _selectedPages?.length ?? (_detectedPages ?? 0);
@@ -95,15 +135,13 @@ class HomeTabState extends State<HomeTab> {
 
 
 
-  /// Local, backend-free page count for the demo. PDFs are counted by
-  /// rasterizing at a very low DPI (fast, just for a page total); other
-  /// file types default to 1 since we can't parse them client-side.
+  /// Page count for the demo order. Uses the same counter the real flow does,
+  /// so the demo can't show a number the live path would refuse to produce.
   Future<int> _detectPagesForDemo(Uint8List bytes, String extension) async {
     if (extension != 'pdf') return 1;
     try {
-      final count = await Printing.raster(bytes, dpi: 10).length;
-      return count > 0 ? count : 1;
-    } catch (_) {
+      return await countPdfPages(bytes);
+    } on PageDetectionException {
       return 1;
     }
   }
@@ -200,6 +238,12 @@ class HomeTabState extends State<HomeTab> {
     final state = context.read<AppState>();
     if (state.locations.isEmpty) state.loadLocations();
     _loadRate();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _pickLocation() async {
@@ -483,14 +527,12 @@ class HomeTabState extends State<HomeTab> {
       return;
     }
 
-    final hasWordFile = selected.any((file) {
-      final name = file.name.toLowerCase();
-      return name.endsWith('.doc') || name.endsWith('.docx');
-    });
-    if (hasWordFile) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Word files cannot be merged on the device yet. Convert them to PDF first.')),
-      );
+    // Everything must be convertible to PDF here — nothing goes to the server
+    // in any other format, and the page count has to come off a real PDF.
+    try {
+      assertAllPrintable(selected.map((file) => file.name));
+    } on DocumentPrepException catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
       return;
     }
 
@@ -531,17 +573,37 @@ class HomeTabState extends State<HomeTab> {
         finalName = 'combined-documents.pdf';
       }
 
+      // Count the pages and fingerprint the merged PDF. This is the number the
+      // order is billed on and the digest the backend re-checks after payment,
+      // so a document whose pages can't be read is refused outright rather
+      // than being ordered against a guess.
+      final prepared = await describeDocument(bytes: finalBytes, fileName: finalName);
+
       if (!mounted) return;
       setState(() {
-        _fileName = finalName;
-        _fileBytes = finalBytes;
-        _fileSizeKb = (finalBytes.length / 1024).ceil();
+        _fileName = prepared.fileName;
+        _fileBytes = prepared.bytes;
+        _fileSizeKb = prepared.sizeKb;
+        _detectedPages = prepared.totalPages;
       });
-      await _uploadPicked();
+      await _registerPrepared(prepared);
+    } on PageDetectionException catch (e) {
+      if (mounted) {
+        _resetDocument();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Uploading failed — ${e.message}. Try re-saving it as a PDF.')),
+        );
+      }
+    } on DocumentPrepException catch (e) {
+      if (mounted) {
+        _resetDocument();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } catch (error) {
       if (mounted) {
+        _resetDocument();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not merge the selected documents: $error')),
+          SnackBar(content: Text('Could not prepare the selected documents: $error')),
         );
       }
     } finally {
@@ -549,22 +611,17 @@ class HomeTabState extends State<HomeTab> {
     }
   }
 
-  Future<void> _uploadPicked() async {
-    if (_fileBytes == null || _fileName == null) return;
-
+  /// Tells the backend what we are about to print — name, size, sha256 and
+  /// page count — so the order can be priced. The PDF itself stays on this
+  /// device and is only sent once the order has been paid for.
+  Future<void> _registerPrepared(PreparedDocument prepared) async {
     final state = context.read<AppState>();
     if (!mounted) return;
 
     try {
-      final uploaded = await state.uploadDocument(
-            fileBytes: _fileBytes!,
-            fileName: _fileName!,
-          );
+      final fileId = await state.registerDocument(prepared);
       if (!mounted) return;
-      setState(() {
-        _fileId = uploaded.fileId;
-        _detectedPages = uploaded.pages;
-      });
+      setState(() => _fileId = fileId);
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -572,7 +629,7 @@ class HomeTabState extends State<HomeTab> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not read the document. Try again.')),
+          const SnackBar(content: Text('Could not reach the print server. Check your connection and try again.')),
         );
       }
     }
@@ -777,6 +834,7 @@ class HomeTabState extends State<HomeTab> {
         : DateFormat('MMM d • h:mm a').format(_scheduledAt!);
 
     return ListView(
+      controller: _scrollController,
       padding: const EdgeInsets.only(bottom: 130),
       children: [
         FadeSlideIn(
@@ -805,7 +863,6 @@ class HomeTabState extends State<HomeTab> {
               targetShapeBorder: const RoundedRectangleBorder(
                 borderRadius: BorderRadius.all(Radius.circular(24)),
               ),
-              enableAutoScroll: true,
               tooltipActions: nextTooltipActions(context, step: 9, total: 10),
               tooltipActionConfig: tooltipNextActionConfig,
               child: _todaySection(state),
@@ -855,7 +912,6 @@ class HomeTabState extends State<HomeTab> {
                         targetShapeBorder: const RoundedRectangleBorder(
                           borderRadius: BorderRadius.all(Radius.circular(24)),
                         ),
-                        enableAutoScroll: true,
                         tooltipActions:
                             nextTooltipActions(context, step: 1, total: 10),
                         tooltipActionConfig: tooltipNextActionConfig,
@@ -1029,7 +1085,6 @@ class HomeTabState extends State<HomeTab> {
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(30)),
             ),
-            enableAutoScroll: true,
             tooltipActions: nextTooltipActions(context, step: 2, total: 10),
             tooltipActionConfig: tooltipNextActionConfig,
             child: PillToggle(
@@ -1074,7 +1129,6 @@ class HomeTabState extends State<HomeTab> {
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(22)),
             ),
-            enableAutoScroll: true,
             tooltipActions: nextTooltipActions(context, step: 3, total: 10),
             tooltipActionConfig: tooltipNextActionConfig,
             child: AnimatedGlowBorder(
@@ -1114,7 +1168,6 @@ class HomeTabState extends State<HomeTab> {
                   targetShapeBorder: const RoundedRectangleBorder(
                     borderRadius: BorderRadius.all(Radius.circular(22)),
                   ),
-                  enableAutoScroll: true,
                   tooltipActions: nextTooltipActions(context, step: 4, total: 10),
                   tooltipActionConfig: tooltipNextActionConfig,
                   child: FieldChip(
@@ -1141,7 +1194,6 @@ class HomeTabState extends State<HomeTab> {
                   targetShapeBorder: const RoundedRectangleBorder(
                     borderRadius: BorderRadius.all(Radius.circular(22)),
                   ),
-                  enableAutoScroll: true,
                   tooltipActions: nextTooltipActions(context, step: 5, total: 10),
                   tooltipActionConfig: tooltipNextActionConfig,
                   child: StepperChip(
@@ -1177,7 +1229,6 @@ class HomeTabState extends State<HomeTab> {
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(22)),
             ),
-            enableAutoScroll: true,
             tooltipActions: nextTooltipActions(context, step: 6, total: 10),
             tooltipActionConfig: tooltipNextActionConfig,
             child: FieldChip(
@@ -1193,7 +1244,6 @@ class HomeTabState extends State<HomeTab> {
             title: 'Estimated Total',
             description:
                 'Your live cost updates instantly as you adjust pages, copies and sides.',
-           enableAutoScroll: true,
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(20)),
             ),
@@ -1262,7 +1312,6 @@ class HomeTabState extends State<HomeTab> {
             title: 'Place Your Order',
             description:
                 "When you're ready, tap here to review and confirm your print job.",
-            enableAutoScroll: true,
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(16)),
             ),

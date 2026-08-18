@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../models/print_order.dart';
 import '../models/user.dart';
 import '../services/api_client.dart';
+import '../services/document_prep.dart';
 import '../services/notification_service.dart';
 import '../services/razorpay_service.dart';
 import '../services/session_store.dart';
@@ -261,6 +263,14 @@ class AppState extends ChangeNotifier {
         .toList();
     await _notifyStatusChanges();
     await loadPenalties();
+
+    // A document is sent only after its order is paid for, which leaves a
+    // window where money has moved and the bytes are still here. If that
+    // upload was interrupted, finish it now — the backend keeps the job out of
+    // the print queue until the document lands, so the order is delayed rather
+    // than lost. Best-effort: a refresh must never fail because of it.
+    unawaited(retryDocumentUploads().catchError((_) => 0));
+
     notifyListeners();
   }
 
@@ -302,22 +312,100 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Uploads a document and returns the backend-detected page count, so the
-  /// UI can show the real total cost before the order is placed.
-  Future<({String fileId, int pages})> uploadDocument({
-    required Uint8List fileBytes,
-    required String fileName,
-  }) async {
+  /// PDFs that have been registered but not yet handed to the backend, keyed by
+  /// file id. The document only goes up after its order is paid for, so it has
+  /// to survive that gap — including a failed first attempt.
+  final Map<String, ({Uint8List bytes, String fileName})> _heldDocuments = {};
+
+  /// Registers a prepared document: the backend records its name, size, sha256
+  /// and page count so the order can be priced, while the PDF itself stays on
+  /// this device until payment clears.
+  ///
+  /// The page count comes from [PreparedDocument], counted off the real PDF
+  /// here — the backend re-counts it from the bytes it eventually receives and
+  /// rejects the upload if the two disagree.
+  Future<String> registerDocument(PreparedDocument document) async {
     if (user == null) throw ApiException('You are not signed in');
-    final uploaded = await ApiClient.uploadFile(
-      bytes: fileBytes,
-      filename: fileName,
+
+    final registered = await ApiClient.registerDocument(
       userId: user!.id,
+      originalName: document.fileName,
+      fileSize: document.bytes.length,
+      totalPages: document.totalPages,
+      checksum: document.checksum,
     );
-    final fileId = uploaded['fileId'].toString();
-    final metadata = uploaded['metadata'] as Map<String, dynamic>?;
-    final pages = (metadata?['totalPages'] as num?)?.toInt() ?? 1;
-    return (fileId: fileId, pages: pages);
+
+    final fileId = registered['fileId'].toString();
+    _heldDocuments[fileId] = (bytes: document.bytes, fileName: document.fileName);
+    return fileId;
+  }
+
+  /// Sends a held document now that its order is paid for.
+  ///
+  /// Returns null on success, or a message explaining why it could not be
+  /// delivered. A failure here does not lose the order: the backend keeps the
+  /// job out of the print queue until the bytes arrive, and the copy stays
+  /// held so [retryDocumentUploads] can finish the job.
+  Future<String?> uploadDocumentFor(String fileId) async {
+    final held = _heldDocuments[fileId];
+    if (held == null) return null; // already delivered, or placed on another device
+
+    try {
+      await ApiClient.uploadDocumentContent(
+        fileId: fileId,
+        bytes: held.bytes,
+        filename: held.fileName,
+      );
+      _heldDocuments.remove(fileId);
+      return null;
+    } on ApiException catch (e) {
+      // The backend judged the document itself (checksum or page-count
+      // mismatch) — retrying the same bytes will fail identically, so stop
+      // holding them and surface the verdict.
+      if (e.message.contains('does not match') || e.message.contains('pages but the order')) {
+        _heldDocuments.remove(fileId);
+      }
+      return e.message;
+    } catch (_) {
+      return 'Could not reach the print server. Your document is safe on this device and will be sent automatically.';
+    }
+  }
+
+  /// Finishes any delivery interrupted earlier in the session. Called after a
+  /// refresh so a paid order that lost its connection completes on its own.
+  Future<int> retryDocumentUploads() async {
+    var delivered = 0;
+    for (final fileId in _heldDocuments.keys.toList()) {
+      if (await uploadDocumentFor(fileId) == null) delivered++;
+    }
+    return delivered;
+  }
+
+  /// The locally held copy of a document, if this device still has it —
+  /// the only source for a preview before payment clears.
+  Uint8List? heldDocumentBytes(String? fileId) =>
+      fileId == null ? null : _heldDocuments[fileId]?.bytes;
+
+  /// The PDF behind an order, wherever it currently lives.
+  ///
+  /// Before payment that is the copy still on this device; afterwards it comes
+  /// back from the print server, which serves it to its owner only and only
+  /// until 24 hours after collection.
+  Future<Uint8List> documentBytesFor(PrintOrder order) async {
+    final held = heldDocumentBytes(order.fileId);
+    if (held != null) return held;
+
+    if (order.fileId.isEmpty) {
+      throw ApiException('This order has no document attached.');
+    }
+    if (!order.documentStored) {
+      throw ApiException(
+        'This document has not been sent to the print server yet. '
+        'It will be available once the payment is confirmed.',
+      );
+    }
+
+    return ApiClient.fetchDocumentContent(order.fileId);
   }
 
   Future<PrintOrder> placeOrder({
@@ -390,6 +478,42 @@ class AppState extends ChangeNotifier {
     } catch (_) {
       // Non-critical — the dues card just shows nothing until retried.
     }
+  }
+
+  /// Pays for a print job through Razorpay and then delivers its document.
+  ///
+  /// The two halves belong together: the PDF has been sitting on this device
+  /// since the order was placed, and the backend holds the job out of the
+  /// print queue until it arrives. Paying without sending would leave a paid
+  /// order that can never print, so both live in one place rather than being
+  /// repeated across the three screens that offer a Pay button.
+  ///
+  /// Returns null when everything landed, or a message about the document when
+  /// payment succeeded but the upload did not.
+  Future<String?> payForOrder(PrintOrder order) async {
+    if (user == null) throw ApiException('You are not signed in');
+
+    final created = await ApiClient.createPaymentOrder(order.jobId);
+    final result = await RazorpayService.checkout(
+      keyId: created['keyId'].toString(),
+      orderId: created['orderId'].toString(),
+      amountInPaise: (created['amountInPaise'] as num).toInt(),
+      name: user?.name ?? 'PrintEase User',
+      description: 'Print job ${order.id}',
+      userEmail: user?.email,
+      userPhone: user?.phone,
+    );
+    await ApiClient.verifyPayment(
+      razorpayOrderId: result.orderId,
+      razorpayPaymentId: result.paymentId,
+      razorpaySignature: result.signature,
+    );
+
+    // Payment is what unlocks the upload — send the document now.
+    final uploadProblem = await uploadDocumentFor(order.fileId);
+
+    await refreshOrders();
+    return uploadProblem;
   }
 
   /// Pays off all outstanding dues directly (independent of any print

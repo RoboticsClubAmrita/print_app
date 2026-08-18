@@ -58,13 +58,50 @@ class _ShellScreenState extends State<ShellScreen>
     });
 
     TourCoordinator.onFinish = _onTourFinish;
+    TourCoordinator.onReplay = _replayTour;
+    TourCoordinator.onStepStart = _onTourStepStart;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      final seen = await SessionStore.seenTour('tour');
+      final userId = _appState.user?.id;
+      final seen = await SessionStore.seenTour('tour', userId: userId);
       if (seen || !mounted) return;
+      // Mark it the moment the tour is *shown*, not when it completes.
+      // Marking on completion meant backgrounding the app, killing it, or
+      // dismissing the showcase mid-way left the flag unset, so the tour
+      // ran again at every launch.
+      await SessionStore.markTourSeen('tour', userId: userId);
+      if (!mounted) return;
       _startFullTour();
     });
   }
+
+  /// The bottom-nav step lives outside the scrolling list, so only the Home
+  /// tab's targets need bringing into view.
+  void _onTourStepStart(GlobalKey key) {
+    _homeKey.currentState?.scrollTourTargetIntoView(key);
+  }
+
+  /// Replay on demand (Profile -> About PrintEase). The coach marks live on
+  /// the Home tab, so switch there first and wait for it to mount before the
+  /// showcase tries to measure its targets.
+  void _replayTour() {
+    _selectTab(0);
+    _startTourWhenHomeReady();
+  }
+
+  void _startTourWhenHomeReady([int attempt = 0]) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_homeKey.currentState == null) {
+        if (attempt < _tourStartAttempts) _startTourWhenHomeReady(attempt + 1);
+        return;
+      }
+      _startFullTour();
+    });
+  }
+
+  /// Frames to wait for the Home tab before giving up on a replay.
+  static const _tourStartAttempts = 10;
 
   void _startFullTour() {
     final home = _homeKey.currentState;
@@ -94,7 +131,6 @@ class _ShellScreenState extends State<ShellScreen>
         },
       ),
     );
-    await SessionStore.markTourSeen('tour');
   }
 
   void _onStateChange() {
@@ -126,6 +162,12 @@ class _ShellScreenState extends State<ShellScreen>
     _tabAnim.dispose();
     if (TourCoordinator.onFinish == _onTourFinish) {
       TourCoordinator.onFinish = null;
+    }
+    if (TourCoordinator.onReplay == _replayTour) {
+      TourCoordinator.onReplay = null;
+    }
+    if (TourCoordinator.onStepStart == _onTourStepStart) {
+      TourCoordinator.onStepStart = null;
     }
     super.dispose();
   }
@@ -217,6 +259,17 @@ class _ShellScreenState extends State<ShellScreen>
                         onPressed: _endOrderDemo,
                         child: const Text('Exit', style: TextStyle(color: AppColors.white)),
                       ),
+                      // Cross alongside the label: the banner sits over the
+                      // content, so there must be an obvious way out of it.
+                      IconButton(
+                        onPressed: _endOrderDemo,
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        color: AppColors.white,
+                        tooltip: 'Exit demo mode',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      ),
                     ],
                   ),
                 ),
@@ -234,7 +287,6 @@ class _ShellScreenState extends State<ShellScreen>
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(30)),
             ),
-            enableAutoScroll: true,
             tooltipActions: nextTooltipActions(context, step: 10, total: 10),
             tooltipActionConfig: tooltipNextActionConfig,
             child: FloatingBottomNav(index: _index, onTap: _selectTab),
@@ -605,6 +657,29 @@ class ProfileTabState extends State<ProfileTab> {
                   fontSize: 13,
                   color: AppColors.textSecondary,
                   height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.play_circle_outline_rounded, size: 20),
+                  label: const Text('Replay walkthrough'),
+                  onPressed: () {
+                    // Close the sheet first: the tour highlights widgets
+                    // behind it, and the shell owns the showcase.
+                    Navigator.of(sheetContext).pop();
+                    TourCoordinator.onReplay?.call();
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Runs the guided tour again from the first step.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: AppColors.textSecondary,
                 ),
               ),
             ],

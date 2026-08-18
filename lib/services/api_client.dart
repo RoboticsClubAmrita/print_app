@@ -7,22 +7,10 @@ import 'package:http_parser/http_parser.dart';
 import '../config/env.dart';
 import 'session_store.dart';
 
-/// Maps a filename extension to the mimetype the backend's multer
-/// fileFilter accepts (see print_backend/utils/uploadHelper.js).
-MediaType _mimeTypeFor(String filename) {
-  final ext = filename.contains('.') ? filename.split('.').last.toLowerCase() : '';
-  return switch (ext) {
-    'pdf' => MediaType('application', 'pdf'),
-    'doc' => MediaType('application', 'msword'),
-    'docx' => MediaType(
-        'application',
-        'vnd.openxmlformats-officedocument.wordprocessingml.document',
-      ),
-    'jpg' || 'jpeg' => MediaType('image', 'jpeg'),
-    'png' => MediaType('image', 'png'),
-    _ => MediaType('application', 'octet-stream'),
-  };
-}
+/// The only content type the backend stores. Everything the user picks is
+/// converted to PDF on the device before it is ever offered (see
+/// lib/services/document_prep.dart), so there is nothing else to map.
+final MediaType _pdfMediaType = MediaType('application', 'pdf');
 
 class ApiException implements Exception {
   final String message;
@@ -154,24 +142,87 @@ class ApiClient {
   }
 
   // ---------------- Files ----------------
+  //
+  // A document is declared before payment and handed over after it. The PDF
+  // never leaves the device in between — see print_backend/routes/fileRoutes.js
+  // for why the two steps are not one.
 
-  static Future<Map<String, dynamic>> uploadFile({
+  /// Declares what we are about to print. No bytes: this is what the order is
+  /// priced against while the PDF stays on the phone.
+  ///
+  /// [totalPages] is counted from the real PDF on this device; the backend
+  /// re-counts it from the bytes it eventually receives and rejects a mismatch.
+  static Future<Map<String, dynamic>> registerDocument({
+    required String userId,
+    required String originalName,
+    required int fileSize,
+    required int totalPages,
+    required String checksum,
+  }) async {
+    final res = await http.post(
+      _u('/files/register'),
+      headers: await _headers(),
+      body: jsonEncode({
+        'userId': userId,
+        'originalName': originalName,
+        'fileSize': fileSize,
+        'totalPages': totalPages,
+        'checksum': checksum,
+      }),
+    );
+    return _unwrap(res) as Map<String, dynamic>; // { fileId, metadata }
+  }
+
+  /// Hands over the PDF for a registration whose job has been paid for.
+  /// Rejected unless the checksum and page count match what was registered.
+  static Future<Map<String, dynamic>> uploadDocumentContent({
+    required String fileId,
     required Uint8List bytes,
     required String filename,
-    required String userId,
   }) async {
-    final req = http.MultipartRequest('POST', _u('/files/upload'));
+    final req = http.MultipartRequest('POST', _u('/files/$fileId/content'));
     req.headers.addAll(await _headers(json: false));
-    req.fields['userId'] = userId;
     req.files.add(http.MultipartFile.fromBytes(
       'file',
       bytes,
       filename: filename,
-      contentType: _mimeTypeFor(filename),
+      contentType: _pdfMediaType,
     ));
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
     return _unwrap(res) as Map<String, dynamic>;
+  }
+
+  /// Reads a stored document back. The backend serves it to its owner only,
+  /// and only until 24 hours after the printout was collected.
+  static Future<Uint8List> fetchDocumentContent(String fileId) async {
+    final res = await http.get(
+      _u('/files/$fileId/content'),
+      headers: await _headers(json: false),
+    );
+    if (res.statusCode == 401) {
+      onUnauthorized?.call();
+      throw ApiException('Session expired. Please log in again.');
+    }
+    if (res.statusCode == 410) {
+      throw ApiException(
+        'This document is no longer available — documents are kept for 24 hours after collection.',
+      );
+    }
+    if (res.statusCode == 403) {
+      throw ApiException('This document belongs to another account.');
+    }
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      // The error path returns the usual JSON envelope even though the success
+      // path is raw PDF bytes.
+      try {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        throw ApiException((body['MESSAGE'] ?? 'Could not open the document').toString());
+      } on FormatException {
+        throw ApiException('Could not open the document (${res.statusCode})');
+      }
+    }
+    return res.bodyBytes;
   }
 
   // ---------------- Jobs ----------------

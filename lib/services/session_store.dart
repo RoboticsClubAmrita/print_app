@@ -58,12 +58,35 @@ class SessionStore {
 
   // ---------------- Feature tours (arrow coach marks), one flag per tab -----
 
-  /// True once the given tab's first-run coach-mark tour has been shown.
-  /// Checked from each tab right after it becomes visible for the first
-  /// time — never re-shown afterwards, even across logouts.
-  static Future<bool> seenTour(String tourKey) async =>
-      (await _storage.read(key: 'seen_tour_$tourKey')) == 'true';
+  /// Keyed per account, not per device: a shared handset would otherwise let
+  /// the first person's walkthrough hide it from everyone who signs in after.
+  /// Falls back to the old device-wide key when no user id is supplied.
+  static String _tourKey(String tourKey, String? userId) =>
+      (userId == null || userId.isEmpty)
+          ? 'seen_tour_$tourKey'
+          : 'seen_tour_${tourKey}_$userId';
 
-  static Future<void> markTourSeen(String tourKey) =>
-      _storage.write(key: 'seen_tour_$tourKey', value: 'true');
+  /// True once this account's first-run coach-mark tour has been shown.
+  /// Checked right after the tab becomes visible for the first time — never
+  /// re-shown to that account afterwards, even across logouts.
+  static Future<bool> seenTour(String tourKey, {String? userId}) async {
+    if (await _storage.read(key: _tourKey(tourKey, userId)) == 'true') {
+      return true;
+    }
+
+    // One-time migration off the old device-wide key: whoever is signed in
+    // when this first runs is the person who dismissed it, so credit them
+    // and retire the key. Every other account still gets its own first run.
+    final legacy = await _storage.read(key: 'seen_tour_$tourKey');
+    if (legacy == 'true' && userId != null && userId.isNotEmpty) {
+      await _storage.write(key: _tourKey(tourKey, userId), value: 'true');
+      await _storage.delete(key: 'seen_tour_$tourKey');
+      return true;
+    }
+
+    return false;
+  }
+
+  static Future<void> markTourSeen(String tourKey, {String? userId}) =>
+      _storage.write(key: _tourKey(tourKey, userId), value: 'true');
 }

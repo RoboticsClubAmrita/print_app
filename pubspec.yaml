@@ -11,6 +11,9 @@ dependencies:
     sdk: flutter
   provider: ^6.1.2
   file_picker: ^8.1.2
+  # sha256 of the prepared PDF: quoted to the backend at registration and
+  # re-checked there when the bytes are uploaded after payment.
+  crypto: ^3.0.3
   intl: ^0.20.2
   http: ^1.2.2
   http_parser: ^4.0.2
