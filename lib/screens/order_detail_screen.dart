@@ -32,12 +32,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     try {
       // Pays and then sends the document this order has been holding on the
       // device since it was placed — see AppState.payForOrder.
-      final uploadProblem = await state.payForOrder(order);
+      final paid = await state.payForOrder(order);
+      final uploadProblem = paid.uploadProblem;
       if (!mounted) return;
       await showSuccessOverlay(
         context,
         title: 'Payment Successful',
-        subtitle: '${rupees(order.cost)} paid for ${order.fileName}.',
+        subtitle: '${rupees(paid.amountPaid.round())} paid for ${order.fileName}.',
         icon: Icons.account_balance_wallet_rounded,
       );
       if (uploadProblem != null && mounted) {

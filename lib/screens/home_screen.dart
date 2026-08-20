@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../config/env.dart';
 import '../data/pricing.dart';
 import '../models/print_order.dart';
 import '../services/api_client.dart';
@@ -588,6 +589,19 @@ class HomeTabState extends State<HomeTab> {
         final generatedPath = await PdfCombiner.generatePDFFromDocuments(inputs: inputs, outputPath: outputPath);
         finalBytes = await File(generatedPath).readAsBytes();
         finalName = 'combined-documents.pdf';
+      }
+
+      // The merged PDF — not any single picked file — is what actually gets
+      // uploaded, so this is the only size that the server's limit applies to.
+      // Checking here means an oversized document fails immediately with a
+      // number the user can act on, instead of after a long upload that the
+      // backend rejects with a generic error.
+      if (finalBytes.length > Env.maxUploadBytes) {
+        final sizeMb = (finalBytes.length / (1024 * 1024)).toStringAsFixed(1);
+        throw DocumentPrepException(
+          'That document is $sizeMb MB, over the ${Env.maxUploadMb} MB upload limit. '
+          'Try selecting fewer files, or splitting it into smaller documents.',
+        );
       }
 
       // Count the pages and fingerprint the merged PDF. This is the number the

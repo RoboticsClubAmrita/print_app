@@ -20,6 +20,18 @@ class AppNotification {
 }
 
 /// Central app state backed by the print_backend REST API.
+/// Outcome of paying for a single print job.
+///
+/// Carries the amount the server actually charged — not the client's cached
+/// estimate — so callers totalling several payments cannot count a rolled-in
+/// balance more than once.
+class OrderPaymentResult {
+  final num amountPaid;
+  final String? uploadProblem;
+
+  const OrderPaymentResult({required this.amountPaid, this.uploadProblem});
+}
+
 class AppState extends ChangeNotifier {
   /// Fixed jobId for the local-only onboarding demo order, so it can be
   /// found and removed later without touching any real order.
@@ -532,10 +544,15 @@ class AppState extends ChangeNotifier {
   ///
   /// Returns null when everything landed, or a message about the document when
   /// payment succeeded but the upload did not.
-  Future<String?> payForOrder(PrintOrder order) async {
+  Future<OrderPaymentResult> payForOrder(PrintOrder order) async {
     if (user == null) throw ApiException('You are not signed in');
 
     final created = await ApiClient.createPaymentOrder(order.jobId);
+    // What the server actually prices this job at right now. It can be lower
+    // than `order.cost`, which is a snapshot from the last orders refresh: any
+    // outstanding balance rolled into that snapshot may since have been
+    // settled by another payment, and the server re-prices before charging.
+    final chargedAmount = (created['amount'] as num?) ?? order.cost;
     final result = await RazorpayService.checkout(
       keyId: created['keyId'].toString(),
       orderId: created['orderId'].toString(),
@@ -555,7 +572,7 @@ class AppState extends ChangeNotifier {
     final uploadProblem = await uploadDocumentFor(order.fileId);
 
     await refreshOrders();
-    return uploadProblem;
+    return OrderPaymentResult(amountPaid: chargedAmount, uploadProblem: uploadProblem);
   }
 
   /// Pays off all outstanding dues directly (independent of any print

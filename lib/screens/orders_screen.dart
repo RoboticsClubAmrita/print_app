@@ -76,20 +76,24 @@ class OrdersTabState extends State<OrdersTab> {
 
     try {
       final unpaid = List<PrintOrder>.from(state.unpaidOrders);
-      var cleared = 0;
+      num cleared = 0;
       final undelivered = <String>[];
       for (final order in unpaid) {
         // Pays and then sends the document each order has been holding on this
         // device since it was placed — see AppState.payForOrder.
-        final problem = await state.payForOrder(order);
+        final paid = await state.payForOrder(order);
+        final problem = paid.uploadProblem;
         if (problem != null) undelivered.add('${order.fileName}: $problem');
-        cleared += order.cost;
+        // The amount the server charged, not this order's cached total: an
+        // outstanding balance is rolled into every unpaid order's snapshot,
+        // so summing those would report the same dues once per order.
+        cleared += paid.amountPaid;
       }
       if (!mounted) return;
       await showSuccessOverlay(
         context,
         title: 'Payment Successful',
-        subtitle: '${rupees(cleared)} cleared — you are all set.',
+        subtitle: '${rupees(cleared.round())} cleared — you are all set.',
         icon: Icons.account_balance_wallet_rounded,
       );
       if (undelivered.isNotEmpty && mounted) {
