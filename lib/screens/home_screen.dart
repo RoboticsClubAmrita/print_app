@@ -133,23 +133,15 @@ class HomeTabState extends State<HomeTab> {
 
   int get _selectedPageCount => _selectedPages?.length ?? (_detectedPages ?? 0);
 
+  /// The backend's rate for a double-sided job is per SHEET, so it multiplies
+  /// the sheet count — not the page count. Billing pages against it quoted
+  /// roughly double the real price on every duplex order.
   int get _estimate => _ratePerPage != null
-      ? (_ratePerPage! * _selectedPageCount * _copies).round()
+      ? (_ratePerPage! * billableUnits(_selectedPageCount, _side) * _copies).round()
       : printCost(pages: _selectedPageCount, copies: _copies, side: _side);
 
 
 
-
-  /// Page count for the demo order. Uses the same counter the real flow does,
-  /// so the demo can't show a number the live path would refuse to produce.
-  Future<int> _detectPagesForDemo(Uint8List bytes, String extension) async {
-    if (extension != 'pdf') return 1;
-    try {
-      return await countPdfPages(bytes);
-    } on PageDetectionException {
-      return 1;
-    }
-  }
 
   Future<void> _loadRate() async {
     try {
@@ -236,12 +228,11 @@ class HomeTabState extends State<HomeTab> {
   @override
   void initState() {
     super.initState();
-    if (widget.demoMode) {
-      _ratePerPage = 2;
-      return;
-    }
     final state = context.read<AppState>();
     if (state.locations.isEmpty) state.loadLocations();
+    // The demo walks through the real form, so it shows the real published
+    // rates too — a hardcoded stand-in here quoted a flat per-page number that
+    // was wrong for double-sided work and drifted whenever pricing changed.
     _loadRate();
   }
 
@@ -252,13 +243,28 @@ class HomeTabState extends State<HomeTab> {
   }
 
   Future<void> _pickLocation() async {
-    if (widget.demoMode) {
-      context.read<AppState>().selectLocation('demo-loc', 'Main Library Stack');
-      return;
-    }
     final state = context.read<AppState>();
     if (state.locations.isEmpty) await state.loadLocations();
     if (!mounted) return;
+
+    // The demo picks for the user rather than opening the sheet, but it picks
+    // a REAL collection point: naming a place that does not exist taught the
+    // wrong thing about where work is actually collected from.
+    if (widget.demoMode) {
+      if (state.locations.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No print locations available yet')),
+        );
+        return;
+      }
+      final first = state.locations.first;
+      state.selectLocation(
+        (first['_id'] ?? '').toString(),
+        (first['name'] ?? 'Location').toString(),
+      );
+      return;
+    }
+
     if (state.locations.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No print locations available yet')),
@@ -433,34 +439,10 @@ class HomeTabState extends State<HomeTab> {
     if (_picking) return;
     setState(() => _picking = true);
     try {
-      if (widget.demoMode) {
-        final result = await FilePicker.platform.pickFiles(withData: true, type: FileType.any);
-        if (result != null && result.files.isNotEmpty && mounted) {
-          final f = result.files.first;
-          if (f.bytes == null) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Could not read that file')),
-            );
-          } else {
-            setState(() {
-              _fileName = f.name;
-              _fileBytes = f.bytes;
-              _fileSizeKb = (f.size / 1024).ceil();
-              _detectedPages = null;
-              _selectedPages = null;
-              _uploading = true;
-            });
-            final ext = f.name.contains('.') ? f.name.split('.').last.toLowerCase() : '';
-            final pages = await _detectPagesForDemo(f.bytes!, ext);
-            if (!mounted) return;
-            setState(() {
-              _detectedPages = pages;
-              _uploading = false;
-            });
-          }
-        }
-        return;
-      }
+      // The demo runs the real preparation pipeline — same allowed formats,
+      // same Word-to-PDF conversion, same page count off the real PDF. It used
+      // to take any file at all and call everything that wasn't a PDF a single
+      // page, so the demo quoted a price for a document that did not exist.
       final result = await FilePicker.platform.pickFiles(
         withData: true,
         allowMultiple: true,
@@ -776,9 +758,7 @@ class HomeTabState extends State<HomeTab> {
       );
       return;
     }
-    // Demo mode never prepares a real document, so it is exempt from the
-    // prepared-PDF requirement the live flow places the order against.
-    if (_uploading || _detectedPages == null || (!widget.demoMode && _prepared == null)) {
+    if (_uploading || _detectedPages == null || _prepared == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Still counting pages — try again in a moment')),
       );
@@ -944,7 +924,8 @@ class HomeTabState extends State<HomeTab> {
               key: _tourTodaysPrints,
               title: "Today's Prints",
               description:
-                  "Everything you've printed today, at a glance.",
+                  "Every order you've placed today, at a glance — including any "
+                  "still waiting to be paid for or printed.",
               targetShapeBorder: const RoundedRectangleBorder(
                 borderRadius: BorderRadius.all(Radius.circular(24)),
               ),
@@ -993,7 +974,8 @@ class HomeTabState extends State<HomeTab> {
                         key: _tourLocation,
                         title: 'Choose Your Location',
                         description:
-                            'Tap here to pick which print stack should receive your order.',
+                            'Tap here to pick where you will collect your printout. '
+                            'The pickup stack itself is assigned for you once it has printed.',
                         targetShapeBorder: const RoundedRectangleBorder(
                           borderRadius: BorderRadius.all(Radius.circular(24)),
                         ),
@@ -1184,22 +1166,55 @@ class HomeTabState extends State<HomeTab> {
           const SizedBox(height: 14),
           if (widget.demoMode && _fileName == null)
             Padding(
-              padding: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.only(bottom: 12),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                 decoration: BoxDecoration(
                   color: AppColors.chip,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.black, width: 1),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0x1A000000)),
                 ),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.touch_app_rounded, size: 18, color: AppColors.black),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        'Upload a file from your device to start the demo',
-                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                    Container(
+                      width: 26,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        color: AppColors.black,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: const Icon(
+                        Icons.description_outlined,
+                        size: 15,
+                        color: AppColors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Pick a document to begin',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                              height: 1.3,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'We count its pages and price it exactly as a real '
+                            'order — then stop before anything is printed or paid.',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              height: 1.35,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -1391,7 +1406,7 @@ class HomeTabState extends State<HomeTab> {
                     ),
                     child: Text(
                       _ratePerPage != null
-                          ? '₹$_ratePerPage / page'
+                          ? backendRateLabel(_ratePerPage!, _side)
                           : rateLabel(_side),
                       style: const TextStyle(
                         fontSize: 12.5,

@@ -546,6 +546,12 @@ class AppState extends ChangeNotifier {
   /// payment succeeded but the upload did not.
   Future<OrderPaymentResult> payForOrder(PrintOrder order) async {
     if (user == null) throw ApiException('You are not signed in');
+    // The demo order exists only on this device — it has no job on the server
+    // to pay for. Guarding here covers every entry point (order detail, the
+    // orders list, billing) rather than trusting each one to check.
+    if (order.jobId == kDemoJobId) {
+      throw ApiException('This is a demo order — there is nothing to pay for.');
+    }
 
     final created = await ApiClient.createPaymentOrder(order.jobId);
     // What the server actually prices this job at right now. It can be lower

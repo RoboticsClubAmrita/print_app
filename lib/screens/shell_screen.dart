@@ -16,6 +16,10 @@ import 'login_screen.dart';
 import 'orders_screen.dart';
 import '../data/pricing.dart';
 
+/// Vertical room reserved at the top of every tab while the demo banner is
+/// floating above them, so the banner never covers a page header.
+const double _kDemoBannerSpace = 62;
+
 class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
 
@@ -204,71 +208,130 @@ class _ShellScreenState extends State<ShellScreen>
                 end: Offset.zero,
               ).animate(_tabCurve),
               child: ResponsiveFrame(
-                child: IndexedStack(
-                  index: _index,
-                  children: [
-                    HomeTab(
-                      key: _homeKey,
-                      onViewOrders: () => _selectTab(1),
-                      onViewProfile: () => _selectTab(3),
-                      bottomNavKey: _tourBottomNav,
-                      demoMode: _demoMode,
-                    ),
-                    OrdersTab(
-                      key: _ordersKey,
-                      demoMode: _demoMode,
-                      onDemoComplete: _endOrderDemo,
-                    ),
-                    BillingTab(
-                      key: _billingKey,
-                      demoMode: _demoMode,
-                      onDemoComplete: _endOrderDemo,
-                    ),
-                    ProfileTab(key: _profileKey),
-                  ],
+                // The demo banner floats above these tabs, so make room
+                // for it rather than letting it cover a page header.
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    top: _demoMode ? _kDemoBannerSpace : 0,
+                  ),
+                  child: IndexedStack(
+                    index: _index,
+                    children: [
+                      HomeTab(
+                        key: _homeKey,
+                        onViewOrders: () => _selectTab(1),
+                        onViewProfile: () => _selectTab(3),
+                        bottomNavKey: _tourBottomNav,
+                        demoMode: _demoMode,
+                      ),
+                      OrdersTab(
+                        key: _ordersKey,
+                        demoMode: _demoMode,
+                        onDemoComplete: _endOrderDemo,
+                      ),
+                      BillingTab(
+                        key: _billingKey,
+                        demoMode: _demoMode,
+                        onDemoComplete: _endOrderDemo,
+                      ),
+                      ProfileTab(key: _profileKey),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
           if (_demoMode)
             Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
+              top: MediaQuery.of(context).padding.top + 10,
               left: 16,
               right: 16,
               child: Material(
                 color: Colors.transparent,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
                   decoration: BoxDecoration(
                     color: AppColors.black,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(18),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x33000000),
+                        blurRadius: 16,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
                   ),
                   child: Row(
                     children: [
-                      const Expanded(
-                        child: Text(
-                          'Demo Mode — placing a sample order',
-                          style: TextStyle(
-                            color: AppColors.white,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                          ),
+                      Container(
+                        width: 26,
+                        height: 26,
+                        decoration: BoxDecoration(
+                          color: AppColors.white.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: const Icon(
+                          Icons.play_arrow_rounded,
+                          size: 17,
+                          color: AppColors.white,
                         ),
                       ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Demo order',
+                              style: TextStyle(
+                                color: AppColors.white,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w800,
+                                height: 1.2,
+                              ),
+                            ),
+                            SizedBox(height: 1),
+                            // Says plainly that this is a rehearsal. The old
+                            // banner left people unsure whether a real order
+                            // had just been placed and money taken.
+                            Text(
+                              'Nothing is printed or charged',
+                              style: TextStyle(
+                                color: Color(0xB3FFFFFF),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                height: 1.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // One way out, labelled. A bare cross sitting next to an
+                      // "Exit" button was two controls doing the same job.
                       TextButton(
                         onPressed: _endOrderDemo,
-                        child: const Text('Exit', style: TextStyle(color: AppColors.white)),
-                      ),
-                      // Cross alongside the label: the banner sits over the
-                      // content, so there must be an obvious way out of it.
-                      IconButton(
-                        onPressed: _endOrderDemo,
-                        icon: const Icon(Icons.close_rounded, size: 18),
-                        color: AppColors.white,
-                        tooltip: 'Exit demo mode',
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.white,
+                          backgroundColor: AppColors.white.withValues(alpha: 0.16),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 6,
+                          ),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(11),
+                          ),
+                        ),
+                        child: const Text(
+                          'Exit',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                       ),
                     ],
                   ),
