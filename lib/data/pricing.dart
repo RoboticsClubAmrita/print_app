@@ -20,4 +20,10 @@ String rateLabel(PrintSide side) => side == PrintSide.single
     ? '₹$singleSidedPerPage / page'
     : '₹$doubleSidedPerSheet / sheet';
 
+/// Labels a rate the backend charged. Double-sided prices are per SHEET
+/// (two pages share one), so calling every rate "per page" misreads the
+/// duplex price by a factor of two.
+String backendRateLabel(num rate, PrintSide side) =>
+    side == PrintSide.single ? '₹$rate / page' : '₹$rate / sheet';
+
 String rupees(int amount) => '₹$amount';

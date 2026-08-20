@@ -454,7 +454,7 @@ class OrdersTabState extends State<OrdersTab> {
                 const SizedBox(height: 2),
                 Text(
                   o.costPerPage > 0
-                      ? 'at ₹${o.costPerPage} / page'
+                      ? 'at ${backendRateLabel(o.costPerPage, o.side)}'
                       : rateLabel(o.side),
                   style: const TextStyle(
                     fontSize: 12.5,
