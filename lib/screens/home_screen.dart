@@ -18,6 +18,7 @@ import '../services/word_document.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/page_range.dart';
+import '../widgets/bottom_nav.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/field_chip.dart';
 import '../widgets/fx.dart';
@@ -95,16 +96,6 @@ class HomeTabState extends State<HomeTab> {
 
   final _scrollController = ScrollController();
 
-  /// Bring a coach-mark target into view for the tour.
-  ///
-  /// The package's own `enableAutoScroll` is off because it positions by
-  /// *layout*, and the order form is painted 46px above where it lays out
-  /// (`Transform.translate` in [build]). That mismatch is what made the
-  /// mid-form steps scroll into place and then visibly correct themselves.
-  ///
-  /// `localToGlobal` reports the *painted* position — it walks the same
-  /// transforms the highlight does — so measuring with it keeps the scroll
-  /// and the spotlight in agreement no matter what offsets the layout uses.
   PrintSide get _side => _sideIndex == 0 ? PrintSide.single : PrintSide.double;
 
   int get _selectedPageCount => _selectedPages?.length ?? (_detectedPages ?? 0);
@@ -576,6 +567,9 @@ class HomeTabState extends State<HomeTab> {
         _detectedPages = prepared.totalPages;
         _prepared = prepared;
       });
+      if (widget.demoMode) {
+        context.read<AppState>().setDemoStage(DemoStage.configure);
+      }
     } on WordDocumentException catch (e) {
       if (mounted) {
         _resetDocument();
@@ -784,6 +778,7 @@ class HomeTabState extends State<HomeTab> {
               selectedPages: _selectedPages,
             ),
           );
+      state.setDemoStage(DemoStage.pay);
       setState(() {
         _resetDocument();
         _copies = 1;
@@ -876,25 +871,23 @@ class HomeTabState extends State<HomeTab> {
 
     return ListView(
       controller: _scrollController,
-      padding: const EdgeInsets.only(bottom: 130),
+      // Enough room for the last card to clear the floating dock, derived from
+      // the dock's real footprint rather than a fixed guess.
+      padding: EdgeInsets.only(bottom: bottomNavScrollClearance(context)),
       children: [
         FadeSlideIn(
           from: const Offset(0, -0.03),
           child: _header(context, firstName),
         ),
-        Transform.translate(
-          offset: const Offset(0, -46),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: FadeSlideIn(
-              delay: const Duration(milliseconds: 90),
-              child: _orderForm(schedLabel),
-            ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: FadeSlideIn(
+            delay: const Duration(milliseconds: 90),
+            child: _orderForm(schedLabel),
           ),
         ),
-        Transform.translate(
-          offset: const Offset(0, -26),
-          child: FadeSlideIn(
+        const SizedBox(height: 18),
+        FadeSlideIn(
             delay: const Duration(milliseconds: 200),
             child: AppShowcase(
               key: _tourTodaysPrints,
@@ -907,7 +900,6 @@ class HomeTabState extends State<HomeTab> {
               child: _todaySection(state),
             ),
           ),
-        ),
       ],
     );
   }
@@ -936,7 +928,10 @@ class HomeTabState extends State<HomeTab> {
                 20,
                 MediaQuery.of(context).padding.top + 18,
                 20,
-                72,
+                // 26 here + the card's own overlap = the 72 this used to be.
+                // Trimming the header instead of painting the card 46px above
+                // where it lays out keeps the list's scroll extent honest.
+                26,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

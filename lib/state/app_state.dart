@@ -25,6 +25,22 @@ class AppNotification {
 /// Carries the amount the server actually charged — not the client's cached
 /// estimate — so callers totalling several payments cannot count a rolled-in
 /// balance more than once.
+/// Where the guided demo has got to. Drives the demo rail's label and
+/// progress, so the user can always see what stage they are at and how much
+/// is left — the demo used to give no sense of position at all.
+enum DemoStage {
+  pickDocument('Choose a document', 1),
+  configure('Set it up and place the order', 2),
+  pay('Pay and you are done', 3);
+
+  const DemoStage(this.label, this.step);
+
+  final String label;
+  final int step;
+
+  static const int total = 3;
+}
+
 class OrderPaymentResult {
   final num amountPaid;
   final String? uploadProblem;
@@ -36,6 +52,15 @@ class AppState extends ChangeNotifier {
   /// Fixed jobId for the local-only onboarding demo order, so it can be
   /// found and removed later without touching any real order.
   static const String kDemoJobId = 'demo-job-001';
+
+  /// Current stage of the guided demo. Reset whenever a demo starts.
+  DemoStage demoStage = DemoStage.pickDocument;
+
+  void setDemoStage(DemoStage stage) {
+    if (demoStage == stage) return;
+    demoStage = stage;
+    notifyListeners();
+  }
   AppUser? user;
   List<PrintOrder> orders = [];
   List<Map<String, dynamic>> locations = [];

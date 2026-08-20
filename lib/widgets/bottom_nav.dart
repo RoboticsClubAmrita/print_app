@@ -5,6 +5,22 @@ import '../theme/app_theme.dart';
 
 /// Premium floating dock navigation: gradient dark pill with layered
 /// shadows; the selected tab expands into a white pill revealing its label.
+/// Height of the floating dock itself: a 44px row inside 6px of padding.
+const double kFloatingNavHeight = 56;
+
+/// Gap the shell leaves beneath the dock (see `ShellScreen.bottomNavigationBar`).
+const double kFloatingNavBottomGap = 18;
+
+/// Trailing space a scrolling page must reserve so its last item clears the
+/// floating dock and the device's own bottom inset instead of hiding under
+/// them. Derived rather than hardcoded so it holds on every screen size —
+/// a phone with a gesture bar, a short window, or the web with no inset.
+double bottomNavScrollClearance(BuildContext context, {double gap = 16}) =>
+    kFloatingNavHeight +
+    kFloatingNavBottomGap +
+    MediaQuery.viewPaddingOf(context).bottom +
+    gap;
+
 class FloatingBottomNav extends StatelessWidget {
   final int index;
   final ValueChanged<int> onTap;

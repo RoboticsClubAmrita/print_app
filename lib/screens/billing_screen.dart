@@ -8,6 +8,7 @@ import '../models/print_order.dart';
 import '../services/api_client.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/bottom_nav.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
 
@@ -133,7 +134,14 @@ class BillingTabState extends State<BillingTab> {
     return SafeArea(
       bottom: false,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 130),
+        // Derived so the last card clears the floating dock on any screen,
+        // rather than a fixed guess that leaves it half-hidden.
+        padding: EdgeInsets.fromLTRB(
+          20,
+          12,
+          20,
+          bottomNavScrollClearance(context),
+        ),
         children: [
           const FadeSlideIn(
             child: Text(

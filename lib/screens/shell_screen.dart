@@ -169,6 +169,7 @@ class _ShellScreenState extends State<ShellScreen>
   }
 
   void _startOrderDemo() {
+    _appState.setDemoStage(DemoStage.pickDocument);
     setState(() => _demoMode = true);
     _selectTab(0);
   }
@@ -769,7 +770,12 @@ class _WelcomeDialog extends StatelessWidget {
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Container(
+      // Without a ceiling this stretched the full width of a desktop window,
+      // which read as a banner rather than a dialog. Matches the ceiling the
+      // rest of the app is laid out against (see ResponsiveFrame).
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: kDialogMaxWidth),
+        child: Container(
         padding: const EdgeInsets.fromLTRB(24, 28, 24, 22),
         decoration: BoxDecoration(
           color: AppColors.white,
@@ -821,15 +827,20 @@ class _WelcomeDialog extends StatelessWidget {
             ),
           ],
         ),
+        ),
       ),
     );
   }
 }
 
 
-/// Demo-mode bar, mirroring the web app's: a full-width strip in normal
-/// layout flow rather than an overlay, so it can never sit on top of the
-/// page it is describing.
+/// Demo rail: the demo's own header, in the same dark-panel language as the
+/// nav dock. Sits in normal layout flow rather than floating over the page, so
+/// it can never cover the content it is describing.
+///
+/// Carries a stage label, a step count and a segmented progress track, so the
+/// user can see where they are and how much is left — the demo previously gave
+/// no sense of position at all.
 class _DemoBar extends StatelessWidget {
   const _DemoBar({required this.onExit});
 
@@ -837,51 +848,111 @@ class _DemoBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final stage = context.select<AppState, DemoStage>((s) => s.demoStage);
+
     return Material(
       color: AppColors.black,
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-          child: Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Demo Mode — placing a sample order',
-                  style: TextStyle(
-                    color: AppColors.white,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
+      child: Ink(
+        decoration: const BoxDecoration(gradient: AppDecor.darkPanelGradient),
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 8, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.white.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: const Text(
+                        'DEMO',
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.6,
+                          color: AppColors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: AnimatedSwitcher(
+                        duration: AppMotion.fast,
+                        child: Text(
+                          stage.label,
+                          key: ValueKey(stage),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.1,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${stage.step}/${DemoStage.total}',
+                      style: TextStyle(
+                        color: AppColors.white.withValues(alpha: 0.55),
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: onExit,
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text(
+                        'Exit',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 9),
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Row(
+                    children: [
+                      for (var i = 1; i <= DemoStage.total; i++) ...[
+                        if (i > 1) const SizedBox(width: 5),
+                        Expanded(
+                          child: AnimatedContainer(
+                            duration: AppMotion.normal,
+                            curve: Curves.easeOutCubic,
+                            height: 3,
+                            decoration: BoxDecoration(
+                              color: AppColors.white.withValues(
+                                alpha: i <= stage.step ? 0.95 : 0.18,
+                              ),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-              ),
-              TextButton(
-                onPressed: onExit,
-                style: TextButton.styleFrom(
-                  foregroundColor: AppColors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: const Text(
-                  'Exit',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    decoration: TextDecoration.underline,
-                  ),
-                ),
-              ),
-              IconButton(
-                onPressed: onExit,
-                icon: const Icon(Icons.close_rounded, size: 17),
-                color: AppColors.white.withValues(alpha: 0.7),
-                tooltip: 'Exit demo mode',
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

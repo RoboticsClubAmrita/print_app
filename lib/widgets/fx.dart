@@ -213,6 +213,9 @@ class _SuccessCard extends StatelessWidget {
       color: Colors.transparent,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 48),
+        // Capped for the same reason as the dialogs: unbounded, this filled a
+        // desktop window edge to edge instead of reading as a card.
+        constraints: const BoxConstraints(maxWidth: kDialogMaxWidth),
         padding: const EdgeInsets.fromLTRB(28, 30, 28, 26),
         decoration: BoxDecoration(
           gradient: AppDecor.darkPanelGradient,
@@ -401,6 +404,10 @@ class _GlowBorderPainter extends CustomPainter {
 
 /// Constrains content width on large screens so layouts stay phone-shaped
 /// and centered instead of stretching edge to edge.
+/// Width ceiling for dialogs, overlays and other centred surfaces, so they
+/// stay card-shaped on a desktop window instead of spanning it.
+const double kDialogMaxWidth = 420;
+
 class ResponsiveFrame extends StatelessWidget {
   final Widget child;
   final double maxWidth;
