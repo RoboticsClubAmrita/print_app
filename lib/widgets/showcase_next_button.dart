@@ -85,13 +85,6 @@ class TourCoordinator {
   /// walkthrough again from step 1. Null when no shell is mounted.
   static VoidCallback? onReplay;
 
-  /// Fired as each coach mark begins, so the screen that owns the scroll view
-  /// can bring the target into view itself. The package's own auto-scroll
-  /// cannot: it positions by layout, and the order form is painted 46px above
-  /// where it lays out (a `Transform.translate`), so its scroll landed short
-  /// and visibly corrected itself on the mid-form steps.
-  static void Function(GlobalKey key)? onStepStart;
-
   /// Total coach-mark steps in the first-login tour (Home tab + the
   /// bottom nav pill). Update this if you add/remove Showcase steps there.
   static const int totalSteps = 10;
@@ -101,8 +94,8 @@ class TourCoordinator {
 /// 1. Highlights must snap directly to their target — no glide/scale
 ///    animation between steps (this was the cause of the spotlight
 ///    appearing to "keep moving up" on repeated Back presses).
-/// 2. Uses the shared [_tourScrollDuration]-equivalent scroll timing so
-///    auto-scroll finishes before the overlay is drawn.
+/// Scrolling targets into view is handled by `ShowCaseWidget`'s own
+/// `enableAutoScroll`.
 class AppShowcase extends Showcase {
   AppShowcase({
     required super.key,

@@ -75,6 +75,8 @@ class HomeTabState extends State<HomeTab> {
   num? _ratePerPage;
 
   // ---------------- First-time feature tour ----------------
+  bool _demoHintDismissed = false;
+
   final _tourLocation = GlobalKey();
 
   final _tourToggle = GlobalKey();
@@ -90,7 +92,6 @@ class HomeTabState extends State<HomeTab> {
   // before highlighting it, so steps further down (Estimated Total, Place
   // Order, etc.) are always reachable regardless of scroll position when
   // the tour starts.
-  static const _tourScrollDuration = Duration(milliseconds: 300);
 
   final _scrollController = ScrollController();
 
@@ -104,31 +105,6 @@ class HomeTabState extends State<HomeTab> {
   /// `localToGlobal` reports the *painted* position — it walks the same
   /// transforms the highlight does — so measuring with it keeps the scroll
   /// and the spotlight in agreement no matter what offsets the layout uses.
-  Future<void> scrollTourTargetIntoView(GlobalKey key) async {
-    final ctx = key.currentContext;
-    if (ctx == null || !_scrollController.hasClients) return;
-
-    final box = ctx.findRenderObject();
-    if (box is! RenderBox || !box.hasSize) return;
-
-    final position = _scrollController.position;
-    final paintedTop = box.localToGlobal(Offset.zero).dy;
-    final viewport = position.viewportDimension;
-
-    // Centre the target, but never fight the ends of the list.
-    final desiredTop = (viewport - box.size.height) / 2;
-    final target = (position.pixels + (paintedTop - desiredTop))
-        .clamp(position.minScrollExtent, position.maxScrollExtent);
-
-    if ((target - position.pixels).abs() < 1) return;
-
-    await _scrollController.animateTo(
-      target,
-      duration: _tourScrollDuration,
-      curve: Curves.easeOutCubic,
-    );
-  }
-
   PrintSide get _side => _sideIndex == 0 ? PrintSide.single : PrintSide.double;
 
   int get _selectedPageCount => _selectedPages?.length ?? (_detectedPages ?? 0);
@@ -923,9 +899,6 @@ class HomeTabState extends State<HomeTab> {
             child: AppShowcase(
               key: _tourTodaysPrints,
               title: "Today's Prints",
-              description:
-                  "Every order you've placed today, at a glance — including any "
-                  "still waiting to be paid for or printed.",
               targetShapeBorder: const RoundedRectangleBorder(
                 borderRadius: BorderRadius.all(Radius.circular(24)),
               ),
@@ -973,9 +946,6 @@ class HomeTabState extends State<HomeTab> {
                       AppShowcase(
                         key: _tourLocation,
                         title: 'Choose Your Location',
-                        description:
-                            'Tap here to pick where you will collect your printout. '
-                            'The pickup stack itself is assigned for you once it has printed.',
                         targetShapeBorder: const RoundedRectangleBorder(
                           borderRadius: BorderRadius.all(Radius.circular(24)),
                         ),
@@ -1147,8 +1117,6 @@ class HomeTabState extends State<HomeTab> {
           AppShowcase(
             key: _tourToggle,
             title: 'Single or Double-Sided',
-            description:
-                'Double-sided fits two pages per sheet — cheaper and greener for long documents.',
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(30)),
             ),
@@ -1164,68 +1132,15 @@ class HomeTabState extends State<HomeTab> {
             ),
           ),
           const SizedBox(height: 14),
-          if (widget.demoMode && _fileName == null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                decoration: BoxDecoration(
-                  color: AppColors.chip,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0x1A000000)),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 26,
-                      height: 26,
-                      decoration: BoxDecoration(
-                        color: AppColors.black,
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: const Icon(
-                        Icons.description_outlined,
-                        size: 15,
-                        color: AppColors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Pick a document to begin',
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w800,
-                              height: 1.3,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'We count its pages and price it exactly as a real '
-                            'order — then stop before anything is printed or paid.',
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              height: 1.35,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+          if (widget.demoMode && _fileName == null && !_demoHintDismissed)
+            _DemoHint(
+              message: 'Try uploading a file to see how ordering works — '
+                  'nothing here gets submitted for real.',
+              onDismiss: () => setState(() => _demoHintDismissed = true),
             ),
           AppShowcase(
             key: _tourDocument,
             title: 'Upload Your Document',
-            description:
-                'Pick any PDF, Word doc or image — we detect the page count instantly.',
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(22)),
             ),
@@ -1276,8 +1191,6 @@ class HomeTabState extends State<HomeTab> {
                 child: AppShowcase(
                   key: _tourPages,
                   title: 'Pick Specific Pages',
-                  description:
-                      'Print every page, or tap in to choose a custom range like 1-5, 8.',
                   targetShapeBorder: const RoundedRectangleBorder(
                     borderRadius: BorderRadius.all(Radius.circular(22)),
                   ),
@@ -1303,7 +1216,6 @@ class HomeTabState extends State<HomeTab> {
                 child: AppShowcase(
                   key: _tourCopies,
                   title: 'Set Your Copies',
-                  description: 'Use + and – to change how many copies you need.',
                   targetShapeBorder: const RoundedRectangleBorder(
                     borderRadius: BorderRadius.all(Radius.circular(22)),
                   ),
@@ -1337,8 +1249,6 @@ class HomeTabState extends State<HomeTab> {
           AppShowcase(
             key: _tourPrintTime,
             title: 'Choose When to Print',
-            description:
-                'Print right now, or schedule your order for a later time.',
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(22)),
             ),
@@ -1355,8 +1265,6 @@ class HomeTabState extends State<HomeTab> {
           AppShowcase(
             key: _tourTotal,
             title: 'Estimated Total',
-            description:
-                'Your live cost updates instantly as you adjust pages, copies and sides.',
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(20)),
             ),
@@ -1423,8 +1331,6 @@ class HomeTabState extends State<HomeTab> {
           AppShowcase(
             key: _tourPlaceOrder,
             title: 'Place Your Order',
-            description:
-                "When you're ready, tap here to review and confirm your print job.",
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(16)),
             ),
@@ -1719,6 +1625,64 @@ class _StatusDot extends StatelessWidget {
       width: 7,
       height: 7,
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+  }
+}
+
+
+/// Single-message demo callout, mapped from the web app's `DemoHint`: a dark
+/// card sitting directly above the thing it points at, with its own dismiss.
+/// Deliberately not the coach-mark machinery — no steps, no backdrop.
+class _DemoHint extends StatelessWidget {
+  const _DemoHint({required this.message, required this.onDismiss});
+
+  final String message;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 11, 8, 11),
+        decoration: BoxDecoration(
+          color: AppColors.black,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x26000000),
+              blurRadius: 14,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: AppColors.white,
+                  fontSize: 12.5,
+                  height: 1.35,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            IconButton(
+              onPressed: onDismiss,
+              icon: const Icon(Icons.close_rounded, size: 15),
+              color: AppColors.white.withValues(alpha: 0.6),
+              tooltip: 'Dismiss',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

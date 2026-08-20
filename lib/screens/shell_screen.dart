@@ -16,10 +16,6 @@ import 'login_screen.dart';
 import 'orders_screen.dart';
 import '../data/pricing.dart';
 
-/// Vertical room reserved at the top of every tab while the demo banner is
-/// floating above them, so the banner never covers a page header.
-const double _kDemoBannerSpace = 62;
-
 class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
 
@@ -63,7 +59,6 @@ class _ShellScreenState extends State<ShellScreen>
 
     TourCoordinator.onFinish = _onTourFinish;
     TourCoordinator.onReplay = _replayTour;
-    TourCoordinator.onStepStart = _onTourStepStart;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       final userId = _appState.user?.id;
@@ -77,12 +72,6 @@ class _ShellScreenState extends State<ShellScreen>
       if (!mounted) return;
       _startFullTour();
     });
-  }
-
-  /// The bottom-nav step lives outside the scrolling list, so only the Home
-  /// tab's targets need bringing into view.
-  void _onTourStepStart(GlobalKey key) {
-    _homeKey.currentState?.scrollTourTargetIntoView(key);
   }
 
   /// Replay on demand (Profile -> About PrintEase). The coach marks live on
@@ -170,9 +159,6 @@ class _ShellScreenState extends State<ShellScreen>
     if (TourCoordinator.onReplay == _replayTour) {
       TourCoordinator.onReplay = null;
     }
-    if (TourCoordinator.onStepStart == _onTourStepStart) {
-      TourCoordinator.onStepStart = null;
-    }
     super.dispose();
   }
 
@@ -198,22 +184,21 @@ class _ShellScreenState extends State<ShellScreen>
     return Scaffold(
       extendBody: true,
       backgroundColor: _index == 1 ? AppColors.black : AppColors.bg,
-      body: Stack(
+      // The demo bar is part of the layout, not an overlay floating on top of
+      // it — the same shape the web app uses. Sitting in the column means it
+      // pushes the page down instead of covering its header.
+      body: Column(
         children: [
-          FadeTransition(
-            opacity: _tabCurve,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.012),
-                end: Offset.zero,
-              ).animate(_tabCurve),
-              child: ResponsiveFrame(
-                // The demo banner floats above these tabs, so make room
-                // for it rather than letting it cover a page header.
-                child: Padding(
-                  padding: EdgeInsets.only(
-                    top: _demoMode ? _kDemoBannerSpace : 0,
-                  ),
+          if (_demoMode) _DemoBar(onExit: _endOrderDemo),
+          Expanded(
+            child: FadeTransition(
+              opacity: _tabCurve,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 0.012),
+                  end: Offset.zero,
+                ).animate(_tabCurve),
+                child: ResponsiveFrame(
                   child: IndexedStack(
                     index: _index,
                     children: [
@@ -241,103 +226,6 @@ class _ShellScreenState extends State<ShellScreen>
               ),
             ),
           ),
-          if (_demoMode)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 10,
-              left: 16,
-              right: 16,
-              child: Material(
-                color: Colors.transparent,
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
-                  decoration: BoxDecoration(
-                    color: AppColors.black,
-                    borderRadius: BorderRadius.circular(18),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x33000000),
-                        blurRadius: 16,
-                        offset: Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 26,
-                        height: 26,
-                        decoration: BoxDecoration(
-                          color: AppColors.white.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(9),
-                        ),
-                        child: const Icon(
-                          Icons.play_arrow_rounded,
-                          size: 17,
-                          color: AppColors.white,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Demo order',
-                              style: TextStyle(
-                                color: AppColors.white,
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w800,
-                                height: 1.2,
-                              ),
-                            ),
-                            SizedBox(height: 1),
-                            // Says plainly that this is a rehearsal. The old
-                            // banner left people unsure whether a real order
-                            // had just been placed and money taken.
-                            Text(
-                              'Nothing is printed or charged',
-                              style: TextStyle(
-                                color: Color(0xB3FFFFFF),
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                height: 1.2,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // One way out, labelled. A bare cross sitting next to an
-                      // "Exit" button was two controls doing the same job.
-                      TextButton(
-                        onPressed: _endOrderDemo,
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppColors.white,
-                          backgroundColor: AppColors.white.withValues(alpha: 0.16),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 6,
-                          ),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(11),
-                          ),
-                        ),
-                        child: const Text(
-                          'Exit',
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
       bottomNavigationBar: Padding(
@@ -346,7 +234,6 @@ class _ShellScreenState extends State<ShellScreen>
           child: AppShowcase(
             key: _tourBottomNav,
             title: 'Switch Between Tabs',
-            description: 'Jump to Orders, Billing or Profile anytime using this bar.',
             targetShapeBorder: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(30)),
             ),
@@ -933,6 +820,69 @@ class _WelcomeDialog extends StatelessWidget {
               child: const Text('Show Me How to Order'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+
+/// Demo-mode bar, mirroring the web app's: a full-width strip in normal
+/// layout flow rather than an overlay, so it can never sit on top of the
+/// page it is describing.
+class _DemoBar extends StatelessWidget {
+  const _DemoBar({required this.onExit});
+
+  final VoidCallback onExit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.black,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+          child: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Demo Mode — placing a sample order',
+                  style: TextStyle(
+                    color: AppColors.white,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: onExit,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text(
+                  'Exit',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: onExit,
+                icon: const Icon(Icons.close_rounded, size: 17),
+                color: AppColors.white.withValues(alpha: 0.7),
+                tooltip: 'Exit demo mode',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            ],
+          ),
         ),
       ),
     );

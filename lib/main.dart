@@ -25,9 +25,11 @@ class PrintServiceApp extends StatelessWidget {
       create: (_) => AppState(),
       child: ShowCaseWidget(
         disableBarrierInteraction: true,
+        // Without this the package never scrolls, and every coach mark past
+        // the fold is drawn over whatever happens to be on screen.
+        enableAutoScroll: true,
         scrollDuration: const Duration(milliseconds: 300),
         onFinish: () => TourCoordinator.onFinish?.call(),
-        onStart: (_, key) => TourCoordinator.onStepStart?.call(key),
         builder: (context) => MaterialApp(
           title: 'PrintEase',
           debugShowCheckedModeBanner: false,
