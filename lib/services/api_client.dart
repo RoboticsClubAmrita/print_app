@@ -31,8 +31,69 @@ class ApiClient {
     final token = await SessionStore.token;
     return {
       if (json) 'Content-Type': 'application/json',
+      // Tells the backend to hand the refresh token back in the JSON body
+      // rather than as a browser cookie, which package:http would discard.
+      'X-Client-Type': 'mobile',
       if (token != null) 'Authorization': 'Bearer $token',
     };
+  }
+
+  /// In-flight refresh shared by every request that hit a 401 at once.
+  /// Refresh tokens are single-use: rotating the same one twice looks like
+  /// theft to the backend, which then revokes the whole session.
+  static Future<bool>? _refreshing;
+
+  static const _logoutTimeout = Duration(seconds: 5);
+
+  /// Runs an authenticated request. If the access token has expired (401),
+  /// swaps the refresh token for a new pair and replays the request once.
+  /// [request] is called again for the replay, so it must build the request
+  /// (including `await _headers()`) inside the closure.
+  ///
+  /// The backend also answers 401 when the caller doesn't own the resource
+  /// (requireOwnerOrAdmin), so a 401 that survives a fresh token means
+  /// "not yours", not "signed out" — it must not end a working session.
+  static Future<http.Response> _send(Future<http.Response> Function() request) async {
+    final res = await request();
+    if (res.statusCode != 401) return res;
+    if (!await _refreshSession()) return res; // session is over: _unwrap signs out
+    final replay = await request();
+    if (replay.statusCode == 401) {
+      throw ApiException('You do not have access to this.');
+    }
+    return replay;
+  }
+
+  static Future<bool> _refreshSession() {
+    return _refreshing ??= _rotateTokens().whenComplete(() => _refreshing = null);
+  }
+
+  static Future<bool> _rotateTokens() async {
+    final refreshToken = await SessionStore.refreshToken;
+    if (refreshToken == null) return false;
+
+    final res = await http.post(
+      _u('/auth/refresh'),
+      headers: {'Content-Type': 'application/json', 'X-Client-Type': 'mobile'},
+      body: jsonEncode({'refreshToken': refreshToken}),
+    );
+    // Only a 401 means the refresh token is dead. Anything else is the server
+    // having a bad moment, which must not cost the user their session.
+    if (res.statusCode == 401) return false;
+    if (res.statusCode != 200) {
+      throw ApiException('Could not reach the server. Please try again.');
+    }
+
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final accessToken = body['accessToken'] ?? body['token'];
+    final rotated = body['refreshToken'];
+    if (accessToken == null || rotated == null) return false;
+
+    // The user logged out while this was in flight: don't resurrect the session.
+    if (await SessionStore.refreshToken != refreshToken) return false;
+
+    await SessionStore.saveTokens(token: accessToken.toString(), refreshToken: rotated.toString());
+    return true;
   }
 
   static dynamic _unwrap(http.Response res) {
@@ -65,7 +126,27 @@ class ApiClient {
     if (res.statusCode != 200) {
       throw ApiException((body['MESSAGE'] ?? body['message'] ?? 'Login failed').toString());
     }
-    return body; // { message, token, userId }
+    return body; // { message, accessToken, token, refreshToken, userId }
+  }
+
+  /// Ends the session on this device. Local tokens are cleared first so the
+  /// user is signed out immediately; the server-side revoke is best-effort —
+  /// an unreachable server must not keep someone logged in.
+  static Future<void> logout() async {
+    final refreshToken = await SessionStore.refreshToken;
+    await SessionStore.clear();
+    if (refreshToken == null) return;
+    try {
+      await http
+          .post(
+            _u('/auth/logout'),
+            headers: await _headers(),
+            body: jsonEncode({'refreshToken': refreshToken}),
+          )
+          .timeout(_logoutTimeout);
+    } catch (e) {
+      debugPrint('Server-side logout failed: $e');
+    }
   }
 
   static Future<String> registerUser({
@@ -137,7 +218,9 @@ class ApiClient {
   }
 
   static Future<Map<String, dynamic>> getUser(String userId) async {
-    final res = await http.get(_u('/users/$userId'), headers: await _headers());
+    final res = await _send(
+      () async => http.get(_u('/users/$userId'), headers: await _headers()),
+    );
     return _unwrap(res) as Map<String, dynamic>;
   }
 
@@ -159,17 +242,17 @@ class ApiClient {
     required int totalPages,
     required String checksum,
   }) async {
-    final res = await http.post(
-      _u('/files/register'),
-      headers: await _headers(),
-      body: jsonEncode({
-        'userId': userId,
-        'originalName': originalName,
-        'fileSize': fileSize,
-        'totalPages': totalPages,
-        'checksum': checksum,
-      }),
-    );
+    final res = await _send(() async => http.post(
+        _u('/files/register'),
+        headers: await _headers(),
+        body: jsonEncode({
+          'userId': userId,
+          'originalName': originalName,
+          'fileSize': fileSize,
+          'totalPages': totalPages,
+          'checksum': checksum,
+        }),
+        ));
     return _unwrap(res) as Map<String, dynamic>; // { fileId, metadata }
   }
 
@@ -180,26 +263,29 @@ class ApiClient {
     required Uint8List bytes,
     required String filename,
   }) async {
-    final req = http.MultipartRequest('POST', _u('/files/$fileId/content'));
-    req.headers.addAll(await _headers(json: false));
-    req.files.add(http.MultipartFile.fromBytes(
-      'file',
-      bytes,
-      filename: filename,
-      contentType: _pdfMediaType,
-    ));
-    final streamed = await req.send();
-    final res = await http.Response.fromStream(streamed);
+    // A MultipartRequest can only be sent once, so a replay after a token
+    // refresh needs a freshly built one.
+    final res = await _send(() async {
+      final req = http.MultipartRequest('POST', _u('/files/$fileId/content'));
+      req.headers.addAll(await _headers(json: false));
+      req.files.add(http.MultipartFile.fromBytes(
+        'file',
+        bytes,
+        filename: filename,
+        contentType: _pdfMediaType,
+      ));
+      return http.Response.fromStream(await req.send());
+    });
     return _unwrap(res) as Map<String, dynamic>;
   }
 
   /// Reads a stored document back. The backend serves it to its owner only,
   /// and only until 24 hours after the printout was collected.
   static Future<Uint8List> fetchDocumentContent(String fileId) async {
-    final res = await http.get(
-      _u('/files/$fileId/content'),
-      headers: await _headers(json: false),
-    );
+    final res = await _send(() async => http.get(
+        _u('/files/$fileId/content'),
+        headers: await _headers(json: false),
+        ));
     if (res.statusCode == 401) {
       onUnauthorized?.call();
       throw ApiException('Session expired. Please log in again.');
@@ -239,62 +325,66 @@ class ApiClient {
     DateTime? scheduledFor,
     String? idempotencyKey,
   }) async {
-    final res = await http.post(
-      _u('/jobs/create'),
-      headers: await _headers(),
-      body: jsonEncode({
-        'userId': userId,
-        'fileId': fileId,
-        'printSide': printSide,
-        'copies': copies,
-        'totalPagesToPrint': totalPagesToPrint,
-        if (locationId != null) 'locationId': locationId,
-        if (selectedPages != null) 'selectedPages': selectedPages,
-        if (scheduleType != null) 'scheduleType': scheduleType,
-        if (scheduledFor != null) 'scheduledFor': scheduledFor.toUtc().toIso8601String(),
-        if (idempotencyKey != null) 'idempotencyKey': idempotencyKey,
-      }),
-    );
+    final res = await _send(() async => http.post(
+        _u('/jobs/create'),
+        headers: await _headers(),
+        body: jsonEncode({
+          'userId': userId,
+          'fileId': fileId,
+          'printSide': printSide,
+          'copies': copies,
+          'totalPagesToPrint': totalPagesToPrint,
+          if (locationId != null) 'locationId': locationId,
+          if (selectedPages != null) 'selectedPages': selectedPages,
+          if (scheduleType != null) 'scheduleType': scheduleType,
+          if (scheduledFor != null) 'scheduledFor': scheduledFor.toUtc().toIso8601String(),
+          if (idempotencyKey != null) 'idempotencyKey': idempotencyKey,
+        }),
+        ));
     return _unwrap(res) as Map<String, dynamic>; // { jobId, referenceId }
   }
 
   static Future<Map<String, dynamic>> getJobById(String jobId) async {
-    final res = await http.get(_u('/jobs/$jobId'), headers: await _headers());
+    final res = await _send(
+      () async => http.get(_u('/jobs/$jobId'), headers: await _headers()),
+    );
     return _unwrap(res) as Map<String, dynamic>;
   }
 
   static Future<List<dynamic>> getJobsByUser(String userId) async {
-    final res = await http.get(_u('/jobs/user/$userId?limit=100'), headers: await _headers());
+    final res = await _send(
+      () async => http.get(_u('/jobs/user/$userId?limit=100'), headers: await _headers()),
+    );
     final data = _unwrap(res) as Map<String, dynamic>;
     return data['jobs'] as List<dynamic>;
   }
 
   static Future<void> cancelJob(String jobId, {String? reason}) async {
-    final res = await http.patch(
-      _u('/jobs/cancel'),
-      headers: await _headers(),
-      body: jsonEncode({'jobId': jobId, if (reason != null) 'reason': reason}),
-    );
+    final res = await _send(() async => http.patch(
+        _u('/jobs/cancel'),
+        headers: await _headers(),
+        body: jsonEncode({'jobId': jobId, if (reason != null) 'reason': reason}),
+        ));
     _unwrap(res);
   }
 
   static Future<String> requestCollect(String jobId) async {
-    final res = await http.post(
-      _u('/jobs/collect/request'),
-      headers: await _headers(),
-      body: jsonEncode({'jobId': jobId}),
-    );
+    final res = await _send(() async => http.post(
+        _u('/jobs/collect/request'),
+        headers: await _headers(),
+        body: jsonEncode({'jobId': jobId}),
+        ));
     final data = _unwrap(res) as Map<String, dynamic>;
     return (data['email'] ?? '').toString();
   }
 
   /// Returns the name of the stack the collected material was sitting in.
   static Future<String> verifyCollect(String jobId, String otp) async {
-    final res = await http.post(
-      _u('/jobs/collect/verify'),
-      headers: await _headers(),
-      body: jsonEncode({'jobId': jobId, 'otp': otp}),
-    );
+    final res = await _send(() async => http.post(
+        _u('/jobs/collect/verify'),
+        headers: await _headers(),
+        body: jsonEncode({'jobId': jobId, 'otp': otp}),
+        ));
     final data = _unwrap(res) as Map<String, dynamic>;
     return (data['stackName'] ?? '').toString();
   }
@@ -302,7 +392,9 @@ class ApiClient {
   // ---------------- Hardware / Locations ----------------
 
   static Future<List<dynamic>> getLocations() async {
-    final res = await http.get(_u('/hardware/locations'), headers: await _headers());
+    final res = await _send(
+      () async => http.get(_u('/hardware/locations'), headers: await _headers()),
+    );
     return _unwrap(res) as List<dynamic>;
   }
 
@@ -313,16 +405,18 @@ class ApiClient {
     required String type, // colour | bw
     required String side, // single | double
   }) async {
-    final res = await http.get(
-      _u('/pricing/lookup?size=$size&type=$type&side=$side'),
-      headers: await _headers(),
-    );
+    final res = await _send(() async => http.get(
+        _u('/pricing/lookup?size=$size&type=$type&side=$side'),
+        headers: await _headers(),
+        ));
     final data = _unwrap(res) as Map<String, dynamic>;
     return data['price'] as num;
   }
 
   static Future<List<dynamic>> getAllPricing() async {
-    final res = await http.get(_u('/pricing/all'), headers: await _headers());
+    final res = await _send(
+      () async => http.get(_u('/pricing/all'), headers: await _headers()),
+    );
     final data = _unwrap(res) as Map<String, dynamic>;
     return data['prices'] as List<dynamic>;
   }
@@ -330,11 +424,11 @@ class ApiClient {
   // ---------------- Payments (Razorpay) ----------------
 
   static Future<Map<String, dynamic>> createPaymentOrder(String jobId) async {
-    final res = await http.post(
-      _u('/payments/create-order'),
-      headers: await _headers(),
-      body: jsonEncode({'jobId': jobId}),
-    );
+    final res = await _send(() async => http.post(
+        _u('/payments/create-order'),
+        headers: await _headers(),
+        body: jsonEncode({'jobId': jobId}),
+        ));
     return _unwrap(res) as Map<String, dynamic>;
   }
 
@@ -343,26 +437,26 @@ class ApiClient {
     required String razorpayPaymentId,
     required String razorpaySignature,
   }) async {
-    final res = await http.post(
-      _u('/payments/verify'),
-      headers: await _headers(),
-      body: jsonEncode({
-        'razorpay_order_id': razorpayOrderId,
-        'razorpay_payment_id': razorpayPaymentId,
-        'razorpay_signature': razorpaySignature,
-      }),
-    );
+    final res = await _send(() async => http.post(
+        _u('/payments/verify'),
+        headers: await _headers(),
+        body: jsonEncode({
+          'razorpay_order_id': razorpayOrderId,
+          'razorpay_payment_id': razorpayPaymentId,
+          'razorpay_signature': razorpaySignature,
+        }),
+        ));
     return _unwrap(res) as Map<String, dynamic>;
   }
 
   /// Creates a Razorpay order to pay off outstanding penalties directly,
   /// independent of any print job (Billing tab "Pay Dues").
   static Future<Map<String, dynamic>> createPenaltyOrder(String userId) async {
-    final res = await http.post(
-      _u('/payments/penalties/create-order'),
-      headers: await _headers(),
-      body: jsonEncode({'userId': userId}),
-    );
+    final res = await _send(() async => http.post(
+        _u('/payments/penalties/create-order'),
+        headers: await _headers(),
+        body: jsonEncode({'userId': userId}),
+        ));
     return _unwrap(res) as Map<String, dynamic>;
   }
 
@@ -371,7 +465,9 @@ class ApiClient {
   /// Displayable business rules (penalty rate/free window, scheduling
   /// limits) — read live from the backend so the app never guesses.
   static Future<Map<String, dynamic>> getPublicConfig() async {
-    final res = await http.get(_u('/config/public'), headers: await _headers());
+    final res = await _send(
+      () async => http.get(_u('/config/public'), headers: await _headers()),
+    );
     return _unwrap(res) as Map<String, dynamic>;
   }
 
@@ -382,7 +478,9 @@ class ApiClient {
   static Future<({List<dynamic> penalties, num totalOutstanding})> getUserPenalties(
     String userId,
   ) async {
-    final res = await http.get(_u('/penalties/user/$userId'), headers: await _headers());
+    final res = await _send(
+      () async => http.get(_u('/penalties/user/$userId'), headers: await _headers()),
+    );
     final data = _unwrap(res) as Map<String, dynamic>;
     return (
       penalties: (data['penalties'] as List<dynamic>?) ?? [],
@@ -394,11 +492,11 @@ class ApiClient {
     required String userId,
     required String newEmail,
   }) async {
-    final res = await http.post(
-      _u('/users/change-email-request'),
-      headers: await _headers(),
-      body: jsonEncode({'userId': userId, 'newEmail': newEmail}),
-    );
+    final res = await _send(() async => http.post(
+        _u('/users/change-email-request'),
+        headers: await _headers(),
+        body: jsonEncode({'userId': userId, 'newEmail': newEmail}),
+        ));
     _unwrap(res);
   }
 
@@ -406,11 +504,11 @@ class ApiClient {
     required String userId,
     required String otp,
   }) async {
-    final res = await http.post(
-      _u('/users/change-email-verify'),
-      headers: await _headers(),
-      body: jsonEncode({'userId': userId, 'otp': otp}),
-    );
+    final res = await _send(() async => http.post(
+        _u('/users/change-email-verify'),
+        headers: await _headers(),
+        body: jsonEncode({'userId': userId, 'otp': otp}),
+        ));
     _unwrap(res);
   }
 
@@ -419,15 +517,15 @@ class ApiClient {
     String? name,
     String? phone,
   }) async {
-    final res = await http.put(
-      _u('/users/edit'),
-      headers: await _headers(),
-      body: jsonEncode({
-        'userId': userId,
-        if (name != null) 'name': name,
-        if (phone != null) 'phone': phone,
-      }),
-    );
+    final res = await _send(() async => http.put(
+        _u('/users/edit'),
+        headers: await _headers(),
+        body: jsonEncode({
+          'userId': userId,
+          if (name != null) 'name': name,
+          if (phone != null) 'phone': phone,
+        }),
+        ));
     _unwrap(res);
   }
 }

@@ -1,28 +1,46 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-/// Persists the JWT and user id issued by POST /auth/login so the
-/// session survives app restarts, plus the "remember me" preference and
-/// the one-time onboarding flag.
+/// Persists the session issued by POST /auth/login — the short-lived access
+/// token, the rotating refresh token and the user id — so the session
+/// survives app restarts, plus the "remember me" preference and the
+/// one-time onboarding flag.
 class SessionStore {
   static const _storage = FlutterSecureStorage();
   static const _tokenKey = 'auth_token';
   static const _userIdKey = 'user_id';
+  static const _refreshTokenKey = 'refresh_token';
 
-  static Future<void> save({required String token, required String userId}) async {
+  static Future<void> save({
+    required String token,
+    required String userId,
+    String? refreshToken,
+  }) async {
     await _storage.write(key: _tokenKey, value: token);
     await _storage.write(key: _userIdKey, value: userId);
+    if (refreshToken != null) {
+      await _storage.write(key: _refreshTokenKey, value: refreshToken);
+    }
+  }
+
+  /// Stores the pair returned by POST /auth/refresh. The old refresh token
+  /// is dead the moment the server rotates it, so both are replaced together.
+  static Future<void> saveTokens({required String token, required String refreshToken}) async {
+    await _storage.write(key: _tokenKey, value: token);
+    await _storage.write(key: _refreshTokenKey, value: refreshToken);
   }
 
   static Future<String?> get token => _storage.read(key: _tokenKey);
   static Future<String?> get userId => _storage.read(key: _userIdKey);
+  static Future<String?> get refreshToken => _storage.read(key: _refreshTokenKey);
 
-  /// Clears every piece of stored *authentication* data (token, user id and
-  /// the remember-me preference). Called on logout and on a failed restore.
+  /// Clears every piece of stored *authentication* data (both tokens, user id
+  /// and the remember-me preference). Called on logout and on a failed restore.
   /// The onboarding flag is intentionally left untouched — it is not auth
   /// data and should not reappear after a logout.
   static Future<void> clear() async {
     await _storage.delete(key: _tokenKey);
     await _storage.delete(key: _userIdKey);
+    await _storage.delete(key: _refreshTokenKey);
     await clearRemember();
   }
 

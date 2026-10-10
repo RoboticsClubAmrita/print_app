@@ -156,7 +156,9 @@ class AppState extends ChangeNotifier {
       await loadPublicConfig();
       return true;
     } catch (_) {
-      await SessionStore.clear();
+      // A dead session has already been cleared via onUnauthorized. Anything
+      // else (offline, server error) keeps the tokens so the next launch can
+      // restore them.
       return false;
     }
   }
@@ -179,9 +181,13 @@ class AppState extends ChangeNotifier {
     }
     try {
       final res = await ApiClient.login(email.trim(), password);
-      final token = res['token'].toString();
+      final token = (res['accessToken'] ?? res['token']).toString();
       final userId = res['userId'].toString();
-      await SessionStore.save(token: token, userId: userId);
+      await SessionStore.save(
+        token: token,
+        userId: userId,
+        refreshToken: res['refreshToken']?.toString(),
+      );
       await _loadUser(userId);
       await refreshOrders();
       await loadPublicConfig();
@@ -267,10 +273,11 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    await SessionStore.clear();
+    // Leave the signed-in UI first; the server-side revoke can be slow.
     user = null;
     orders = [];
     notifyListeners();
+    await ApiClient.logout();
   }
 
   // ---------------- Orders ----------------
