@@ -109,13 +109,21 @@ class AppState extends ChangeNotifier {
 
   // ---------------- Pricing ----------------
 
+  /// True once [loadPricing] has succeeded at least once, so the order form
+  /// can tell "still loading" from "this combination has no price".
+  bool pricingLoaded = false;
+
+  /// Loads the live tariff the order form prices from (and the rates sheet
+  /// lists). Re-read whenever the order form opens, so an admin price change
+  /// applies to the next order. On failure the last known tariff is kept.
   Future<void> loadPricing() async {
     try {
       final result = await ApiClient.getAllPricing();
       pricing = result.cast<Map<String, dynamic>>();
+      pricingLoaded = true;
       notifyListeners();
     } catch (_) {
-      // Non-critical — the rates sheet just shows nothing.
+      // The form shows the rate as unavailable and blocks the order.
     }
   }
 
@@ -520,6 +528,8 @@ class AppState extends ChangeNotifier {
     required int pages,
     required int copies,
     required PrintSide side,
+    required String pageType,
+    required String colorMode,
     List<int>? selectedPages,
     DateTime? scheduledFor,
   }) async {
@@ -529,6 +539,8 @@ class AppState extends ChangeNotifier {
       userId: user!.id,
       fileId: fileId,
       printSide: side.backendValue,
+      pageType: pageType,
+      colorMode: colorMode,
       copies: copies,
       totalPagesToPrint: pages,
       locationId: selectedLocationId,

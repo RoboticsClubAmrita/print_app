@@ -23,6 +23,9 @@ class PrintPreviewScreen extends StatelessWidget {
   final List<int>? selectedPages; // 1-based page numbers, null = all
   final int copies;
   final PrintSide side;
+
+  /// e.g. "A4 • B&W" — paper size and colour the order is priced at.
+  final String paperLabel;
   final String? locationName;
   final String scheduleLabel;
   final int estimatedCost;
@@ -35,6 +38,7 @@ class PrintPreviewScreen extends StatelessWidget {
     required this.selectedPages,
     required this.copies,
     required this.side,
+    required this.paperLabel,
     required this.locationName,
     required this.scheduleLabel,
     required this.estimatedCost,
@@ -208,6 +212,7 @@ class PrintPreviewScreen extends StatelessWidget {
           ),
           _row('Copies', '$copies'),
           _row('Side', side.label),
+          _row('Paper', paperLabel),
           _row(
             'Total sheets',
             '${side == PrintSide.single ? _pageCount : (_pageCount + 1) ~/ 2} × $copies',

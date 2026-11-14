@@ -65,15 +65,13 @@ class HomeTabState extends State<HomeTab> {
   List<int>? _selectedPages; // null = every page
   int _copies = 1;
   int _sideIndex = 0;
+  int _sizeIndex = 0; // index into paperSizes — A4 first
+  int _colorIndex = 0; // 0 = Black & White, 1 = Colour
   DateTime? _scheduledAt;
   bool _picking = false;
   bool _uploading = false;
   bool _placing = false;
 
-  /// Real per-page rate from the backend's pricing table (A4/BW — the
-  /// only size/color this form offers) — replaces the flat local
-  /// estimate so the shown price always matches what's actually billed.
-  num? _ratePerPage;
 
   // ---------------- First-time feature tour ----------------
   bool _demoHintDismissed = false;
@@ -100,27 +98,29 @@ class HomeTabState extends State<HomeTab> {
 
   int get _selectedPageCount => _selectedPages?.length ?? (_detectedPages ?? 0);
 
-  /// The backend's rate for a double-sided job is per SHEET, so it multiplies
-  /// the sheet count — not the page count. Billing pages against it quoted
-  /// roughly double the real price on every duplex order.
-  int get _estimate => _ratePerPage != null
-      ? (_ratePerPage! * billableUnits(_selectedPageCount, _side) * _copies).round()
-      : printCost(pages: _selectedPageCount, copies: _copies, side: _side);
+  String get _pageType => paperSizes[_sizeIndex];
 
+  String get _colorMode => _colorIndex == 0 ? 'BW' : 'COLOR';
 
-
-
-  Future<void> _loadRate() async {
-    try {
-      final rate = await ApiClient.pricingLookup(
-        size: 'A4',
-        type: 'bw',
-        side: _side == PrintSide.single ? 'single' : 'double',
+  /// Live tariff rate for the chosen size × colour × side, or null while the
+  /// tariff loads or when the admin hasn't priced that combination.
+  num? get _rate => rateFor(
+        context.read<AppState>().pricing,
+        pageType: _pageType,
+        colorMode: _colorMode,
+        side: _side,
       );
-      if (mounted) setState(() => _ratePerPage = rate);
-    } catch (_) {
-      // Non-critical — falls back to the local flat-rate estimate.
-    }
+
+  /// True once rates loaded and this combination has no price — the backend
+  /// would refuse the order, so it can't be placed.
+  bool get _unpriced => context.read<AppState>().pricingLoaded && _rate == null;
+
+  /// The backend's rate for a double-sided job is per SHEET, so it multiplies
+  /// the sheet count — not the page count.
+  int get _estimate {
+    final rate = _rate;
+    if (rate == null) return 0;
+    return printCost(pages: _selectedPageCount, copies: _copies, side: _side, rate: rate);
   }
 
   /// Showcase keys in tour order, contributed to the single combined tour
@@ -197,10 +197,10 @@ class HomeTabState extends State<HomeTab> {
     super.initState();
     final state = context.read<AppState>();
     if (state.locations.isEmpty) state.loadLocations();
-    // The demo walks through the real form, so it shows the real published
-    // rates too — a hardcoded stand-in here quoted a flat per-page number that
-    // was wrong for double-sided work and drifted whenever pricing changed.
-    _loadRate();
+    // Re-read the tariff every time the form opens, so a price the admin
+    // just changed in Pricing & Rules is what this order is quoted at. The
+    // demo walks through the real form, so it shows the real rates too.
+    state.loadPricing();
   }
 
   @override
@@ -644,8 +644,7 @@ class HomeTabState extends State<HomeTab> {
 
   /// Clears the picked document and every piece of state derived from it.
   /// Print settings (copies, side, schedule) are intentionally preserved —
-  /// they aren't document-derived. `_estimate` follows automatically, and
-  /// `_ratePerPage` is keyed on side rather than the file, so it stays.
+  /// they aren't document-derived. `_estimate` follows automatically.
   void _resetDocument() {
     _selectedSourceFiles = [];
     _fileName = null;
@@ -735,6 +734,19 @@ class HomeTabState extends State<HomeTab> {
       return;
     }
     if (_placing) return;
+    if (_rate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.read<AppState>().pricingLoaded
+                ? 'That paper size and colour isn\'t available yet — pick another option'
+                : 'Print rates are still loading — try again in a moment',
+          ),
+        ),
+      );
+      if (!context.read<AppState>().pricingLoaded) context.read<AppState>().loadPricing();
+      return;
+    }
 
     final state = context.read<AppState>();
     final confirmed = await Navigator.of(context).push<bool>(
@@ -746,6 +758,7 @@ class HomeTabState extends State<HomeTab> {
           selectedPages: _selectedPages,
           copies: _copies,
           side: _side,
+          paperLabel: '$_pageType • ${_colorIndex == 0 ? 'B&W' : 'Colour'}',
           locationName: state.selectedLocationName,
           scheduleLabel: _scheduledAt == null
               ? 'Now'
@@ -770,6 +783,9 @@ class HomeTabState extends State<HomeTab> {
               pages: _selectedPageCount,
               copies: _copies,
               side: _side,
+              pageType: _pageType,
+              colorMode: _colorMode,
+              costPerPage: _rate ?? 0,
               createdAt: DateTime.now(),
               scheduledAt: _scheduledAt ?? DateTime.now(),
               scheduledNow: _scheduledAt == null,
@@ -813,6 +829,8 @@ class HomeTabState extends State<HomeTab> {
             pages: pages?.length ?? serverPages,
             copies: _copies,
             side: _side,
+            pageType: _pageType,
+            colorMode: _colorMode,
             selectedPages: pages,
             scheduledFor: _scheduledAt,
           );
@@ -1120,12 +1138,37 @@ class HomeTabState extends State<HomeTab> {
             child: PillToggle(
               options: const ['Single-sided', 'Double-sided'],
               selectedIndex: _sideIndex,
-              onChanged: (i) {
-                setState(() => _sideIndex = i);
-                _loadRate();
-              },
+              onChanged: (i) => setState(() => _sideIndex = i),
             ),
           ),
+          const SizedBox(height: 14),
+          const _FieldLabel('Paper size'),
+          PillToggle(
+            options: paperSizes,
+            selectedIndex: _sizeIndex,
+            onChanged: (i) => setState(() => _sizeIndex = i),
+          ),
+          const SizedBox(height: 14),
+          const _FieldLabel('Print colour'),
+          PillToggle(
+            options: const ['Black & White', 'Colour'],
+            selectedIndex: _colorIndex,
+            onChanged: (i) => setState(() => _colorIndex = i),
+          ),
+          if (_unpriced)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                '$_pageType ${_colorIndex == 0 ? 'B&W' : 'Colour'} '
+                '${_side == PrintSide.double ? 'double' : 'single'}-sided printing '
+                "isn't available yet. Pick another option.",
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.black,
+                ),
+              ),
+            ),
           const SizedBox(height: 14),
           if (widget.demoMode && _fileName == null && !_demoHintDismissed)
             _DemoHint(
@@ -1308,9 +1351,7 @@ class HomeTabState extends State<HomeTab> {
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Text(
-                      _ratePerPage != null
-                          ? backendRateLabel(_ratePerPage!, _side)
-                          : rateLabel(_side),
+                      _rate == null ? '—' : rateLabel(_rate!, _side),
                       style: const TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w700,
@@ -1676,6 +1717,29 @@ class _DemoHint extends StatelessWidget {
               constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Small caption above a form control (Paper size, Print colour).
+class _FieldLabel extends StatelessWidget {
+  final String text;
+
+  const _FieldLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 8),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.2,
+          color: AppColors.textSecondary,
         ),
       ),
     );

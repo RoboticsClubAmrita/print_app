@@ -321,6 +321,8 @@ class ApiClient {
     required String userId,
     required String fileId,
     required String printSide, // SINGLE | DOUBLE
+    required String pageType, // A4 | A3 | A2
+    required String colorMode, // BW | COLOR
     required int copies,
     required int totalPagesToPrint,
     String? locationId,
@@ -336,6 +338,8 @@ class ApiClient {
           'userId': userId,
           'fileId': fileId,
           'printSide': printSide,
+          'pageType': pageType,
+          'colorMode': colorMode,
           'copies': copies,
           'totalPagesToPrint': totalPagesToPrint,
           if (locationId != null) 'locationId': locationId,
@@ -403,19 +407,6 @@ class ApiClient {
   }
 
   // ---------------- Pricing ----------------
-
-  static Future<num> pricingLookup({
-    required String size, // A2 | A3 | A4
-    required String type, // colour | bw
-    required String side, // single | double
-  }) async {
-    final res = await _send(() async => http.get(
-        _u('/pricing/lookup?size=$size&type=$type&side=$side'),
-        headers: await _headers(),
-        ));
-    final data = _unwrap(res) as Map<String, dynamic>;
-    return data['price'] as num;
-  }
 
   static Future<List<dynamic>> getAllPricing() async {
     final res = await _send(

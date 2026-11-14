@@ -190,11 +190,11 @@ class PrintOrder {
       status != OrderStatus.cancelled &&
       status != OrderStatus.failed;
 
-  /// Prefers the backend-computed cost; falls back to the local
-  /// rate table only for orders that never reached the server.
+  /// Prefers the backend-computed cost; otherwise recomputes it from the
+  /// rate the backend priced the order at.
   int get cost => backendCost > 0
       ? backendCost.round()
-      : printCost(pages: pages, copies: copies, side: side);
+      : printCost(pages: pages, copies: copies, side: side, rate: costPerPage);
 
   /// Sheets of paper used per copy (double-sided fits 2 pages per sheet).
   int get sheetsPerCopy => side == PrintSide.single ? pages : (pages + 1) ~/ 2;

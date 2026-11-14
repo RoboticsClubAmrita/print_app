@@ -565,10 +565,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           _costRow('Pages per copy', '${order.pages}'),
           _costRow('Copies', '${order.copies}'),
           if (order.costPerPage > 0) ...[
-            _costRow('Rate charged', backendRateLabel(order.costPerPage, order.side)),
+            _costRow('Rate charged', rateLabel(order.costPerPage, order.side)),
             _costRow('Print cost', rupees(order.basePrintCost.round())),
-          ] else
-            _costRow('Rate', rateLabel(order.side)),
+          ],
           if (order.balanceApplied > 0) ...[
             _costRow(
               'Outstanding balance added',
