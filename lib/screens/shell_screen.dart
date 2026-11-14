@@ -24,7 +24,7 @@ class ShellScreen extends StatefulWidget {
 }
 
 class _ShellScreenState extends State<ShellScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   int _index = 0;
   bool _demoMode = false;
   final _homeKey = GlobalKey<HomeTabState>();
@@ -53,9 +53,8 @@ class _ShellScreenState extends State<ShellScreen>
     _appState = context.read<AppState>();
     _appState.addListener(_onStateChange);
     _appState.tabRequest.addListener(_onTabRequest);
-    _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
-      _appState.refreshOrders();
-    });
+    WidgetsBinding.instance.addObserver(this);
+    _pollTimer = Timer.periodic(_pollInterval, (_) => _pollOrders());
 
     TourCoordinator.onFinish = _onTourFinish;
     TourCoordinator.onReplay = _replayTour;
@@ -146,8 +145,29 @@ class _ShellScreenState extends State<ShellScreen>
     }
   }
 
+  /// Matches the web app's poll (`useLiveOrders`), so both clients see a
+  /// print move on in the same time.
+  static const _pollInterval = Duration(seconds: 20);
+
+  /// Statuses change on the print side, not from anything this app does.
+  /// A failed poll is harmless (the next one retries) but must not surface
+  /// as an unhandled async error.
+  void _pollOrders() {
+    _appState.refreshOrders().catchError((Object e) {
+      debugPrint('Order poll failed: $e');
+    });
+  }
+
+  /// Timers do not fire while the app is backgrounded, so a user returning
+  /// to check on a print would otherwise wait up to a full interval.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _pollOrders();
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _appState.removeListener(_onStateChange);
     _appState.tabRequest.removeListener(_onTabRequest);
     _pollTimer?.cancel();

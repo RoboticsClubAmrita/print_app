@@ -7,7 +7,6 @@ import '../theme/app_theme.dart';
 import '../utils/validators.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
-import '../widgets/pill_toggle.dart';
 import 'otp_verification_screen.dart';
 import 'shell_screen.dart';
 
@@ -21,23 +20,19 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final _name = TextEditingController();
   final _collegeId = TextEditingController();
-  final _email = TextEditingController();
   final _phone = TextEditingController();
   final _password = TextEditingController();
   bool _obscure = true;
   bool _submitting = false;
 
-  // 0 = Student, 1 = Faculty
-  int _roleIndex = 0;
-
-  static const _roleValues = ['STUDENT', 'FACULTY'];
-  String get _collegeIdLabel => _roleIndex == 0 ? 'Roll Number' : 'College ID';
+  /// Must match the backend's /auth/register/resend cooldown, or an early
+  /// resend is refused.
+  static const _resendCooldownSeconds = 60;
 
   @override
   void dispose() {
     _name.dispose();
     _collegeId.dispose();
-    _email.dispose();
     _phone.dispose();
     _password.dispose();
     super.dispose();
@@ -45,10 +40,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   String? _validate() {
     if (_name.text.trim().isEmpty) return 'Enter your full name';
-    if (_collegeId.text.trim().isEmpty) return 'Enter your $_collegeIdLabel';
-    if (!Validators.isAmritaEmail(_email.text)) {
-      return 'Use your Amrita email (@amrita.edu)';
-    }
+    if (_collegeId.text.trim().isEmpty) return 'Enter your Roll Number';
     if (!Validators.isValidPhone(_phone.text)) {
       return 'Enter a valid phone number';
     }
@@ -67,49 +59,47 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
     setState(() => _submitting = true);
     final state = context.read<AppState>();
-    final email = _email.text.trim();
-    final error = await state.register(
+    final collegeId = _collegeId.text.trim().toUpperCase();
+    final result = await state.register(
       name: _name.text,
-      email: email,
-      password: _password.text,
-      collegeId: _collegeId.text,
+      collegeId: collegeId,
       phone: _phone.text,
-      role: _roleValues[_roleIndex],
+      password: _password.text,
     );
     if (!mounted) return;
     setState(() => _submitting = false);
-    if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    if (result.error != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(result.error!)));
       return;
     }
+    final sentTo = (result.email?.isNotEmpty ?? false)
+        ? result.email!
+        : 'your Amrita email';
 
-    // Verify the email OTP on the shared premium screen. Backing out returns
-    // here with the form intact, so the user can change the email and retry.
+    // Verify the OTP on the shared premium screen. Verifying creates the
+    // account and signs this device in, so no separate login follows.
+    // Backing out returns here with the form intact, so the user can fix the
+    // roll number and retry.
     final verified = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => OtpVerificationScreen(
           title: 'Verify your email',
-          subtitle: 'Enter the 4-digit code sent to $email.\n'
-              'Wrong address? Go back to change it.',
+          subtitle: 'Enter the 4-digit code sent to $sentTo.\n'
+              'Wrong roll number? Go back to change it.',
           verifyLabel: 'Verify email',
           successTitle: 'Email verified',
           successSubtitle: 'Welcome to PrintEase!',
           successIcon: Icons.mark_email_read_rounded,
           headerIcon: Icons.mark_email_read_outlined,
-          onVerify: (code) => state.verifyEmail(email, code),
-          onResend: () => state.resendVerification(email),
+          resendSeconds: _resendCooldownSeconds,
+          onVerify: (code) => state.verifyRegistration(collegeId, code),
+          onResend: () => state.resendRegistration(collegeId),
         ),
       ),
     );
     if (verified != true || !mounted) return;
 
-    final loginError = await state.login(email, _password.text);
-    if (!mounted) return;
-    if (loginError != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(loginError)));
-      return;
-    }
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const ShellScreen()),
       (route) => false,
@@ -180,23 +170,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       const Padding(
-                        padding: EdgeInsets.only(left: 4, bottom: 8),
+                        padding: EdgeInsets.only(left: 4, bottom: 16),
                         child: Text(
-                          'I am a',
+                          'Join with your roll number — your Amrita email is set up automatically.',
                           style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.2,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
                             color: AppColors.textSecondary,
                           ),
                         ),
                       ),
-                      PillToggle(
-                        options: const ['Student', 'Faculty'],
-                        selectedIndex: _roleIndex,
-                        onChanged: (i) => setState(() => _roleIndex = i),
-                      ),
-                      const SizedBox(height: 16),
                       TextField(
                         controller: _name,
                         textCapitalization: TextCapitalization.words,
@@ -214,21 +197,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         textCapitalization: TextCapitalization.characters,
                         style: AppTheme.fieldTextStyle,
                         decoration: AppTheme.fieldDecoration(
-                          label: _collegeIdLabel,
-                          hint: _roleIndex == 0 ? 'CB.SC.U4XXXXXX' : 'Staff ID',
+                          label: 'Roll Number',
+                          hint: 'CB.SC.U4XXXXXX',
                           prefixIcon: const Icon(Icons.badge_outlined,
-                              color: AppColors.black, size: 20),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      TextField(
-                        controller: _email,
-                        keyboardType: TextInputType.emailAddress,
-                        style: AppTheme.fieldTextStyle,
-                        decoration: AppTheme.fieldDecoration(
-                          label: 'Amrita Email',
-                          hint: 'you@amrita.edu',
-                          prefixIcon: const Icon(Icons.mail_outline_rounded,
                               color: AppColors.black, size: 20),
                         ),
                       ),

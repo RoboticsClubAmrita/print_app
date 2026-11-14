@@ -200,35 +200,59 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Returns null on success, or an error message. On success the caller
-  /// must still verify the email OTP before the user can log in.
-  ///
-  /// The College ID is sent fully upper-cased (the backend also enforces this
-  /// in Phase B); [role] is one of 'STUDENT' / 'FACULTY'.
-  Future<String?> register({
+  /// Starts signup. Returns `(error, email)`: on success `error` is null and
+  /// `email` is the Amrita address the backend derived from the roll number —
+  /// the one the OTP was sent to. No account exists until [verifyRegistration].
+  Future<({String? error, String? email})> register({
     required String name,
-    required String email,
-    required String password,
     required String collegeId,
     required String phone,
-    required String role,
+    required String password,
   }) async {
     if (name.trim().isEmpty ||
-        email.trim().isEmpty ||
-        password.isEmpty ||
         collegeId.trim().isEmpty ||
-        phone.trim().isEmpty) {
-      return 'Fill in all fields to register';
+        phone.trim().isEmpty ||
+        password.isEmpty) {
+      return (error: 'Fill in all fields to register', email: null);
     }
     try {
-      await ApiClient.registerUser(
+      final email = await ApiClient.registerStart(
         collegeId: collegeId.trim().toUpperCase(),
         name: name.trim(),
-        email: email.trim(),
         phone: phone.trim(),
         password: password,
-        role: role,
       );
+      return (error: null, email: email);
+    } on ApiException catch (e) {
+      return (error: e.message, email: null);
+    } catch (_) {
+      return (error: 'Could not reach the server. Check your connection.', email: null);
+    }
+  }
+
+  /// Verifies the signup OTP. On success the account now exists and this
+  /// device is signed in (a new account stays signed in). Returns null on
+  /// success, or an error message.
+  Future<String?> verifyRegistration(String collegeId, String otp) async {
+    try {
+      final res = await ApiClient.registerVerify(
+        collegeId: collegeId.trim().toUpperCase(),
+        otp: otp,
+      );
+      final token = (res['accessToken'] ?? res['token'])?.toString();
+      final userId = res['userId']?.toString();
+      if (token == null || userId == null) return 'Invalid code. Try again.';
+      await SessionStore.save(
+        token: token,
+        userId: userId,
+        refreshToken: res['refreshToken']?.toString(),
+      );
+      await SessionStore.setRemember(remember: true);
+      await _loadUser(userId);
+      await refreshOrders();
+      await loadLocations();
+      await loadPublicConfig();
+      notifyListeners();
       return null;
     } on ApiException catch (e) {
       return e.message;
@@ -238,20 +262,9 @@ class AppState extends ChangeNotifier {
   }
 
   /// Returns null on success, or an error message.
-  Future<String?> verifyEmail(String email, String otp) async {
+  Future<String?> resendRegistration(String collegeId) async {
     try {
-      await ApiClient.verifyEmail(email, otp);
-      return null;
-    } on ApiException catch (e) {
-      return e.message;
-    } catch (_) {
-      return 'Could not reach the server. Check your connection.';
-    }
-  }
-
-  Future<String?> resendVerification(String email) async {
-    try {
-      await ApiClient.resendVerification(email);
+      await ApiClient.registerResend(collegeId.trim().toUpperCase());
       return null;
     } on ApiException catch (e) {
       return e.message;
@@ -298,7 +311,15 @@ class AppState extends ChangeNotifier {
         .toList();
   }
 
-  Future<void> refreshOrders() async {
+  /// The refresh currently in flight, shared by every caller — the shell's
+  /// poll, app resume, and post-action refreshes would otherwise race and
+  /// could apply an older response over a newer one.
+  Future<void>? _ordersRefresh;
+
+  Future<void> refreshOrders() =>
+      _ordersRefresh ??= _fetchOrders().whenComplete(() => _ordersRefresh = null);
+
+  Future<void> _fetchOrders() async {
     if (user == null) return;
     final jobs = await ApiClient.getJobsByUser(user!.id);
     orders = jobs
@@ -534,8 +555,16 @@ class AppState extends ChangeNotifier {
     return stackName;
   }
 
+  /// Cancels an order. The backend refuses once printing has started; the
+  /// list is refreshed either way so the screen shows the real status (and
+  /// drops the Cancel button) before the refusal is rethrown.
   Future<void> cancelOrder(PrintOrder order) async {
-    await ApiClient.cancelJob(order.jobId);
+    try {
+      await ApiClient.cancelJob(order.jobId);
+    } catch (_) {
+      await refreshOrders().catchError((_) {});
+      rethrow;
+    }
     await refreshOrders();
   }
 

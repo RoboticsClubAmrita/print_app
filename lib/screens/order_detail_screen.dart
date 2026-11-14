@@ -62,8 +62,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     setState(() => _busy = true);
     try {
       await context.read<AppState>().cancelOrder(order);
-    } on ApiException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      // Typically: printing started after this screen last refreshed.
+      if (mounted) {
+        final message = e is ApiException ? e.message : 'Could not reach the server. Check your connection.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

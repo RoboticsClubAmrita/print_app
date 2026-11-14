@@ -149,44 +149,48 @@ class ApiClient {
     }
   }
 
-  static Future<String> registerUser({
+  /// Starts pending-until-verified signup. No account exists until
+  /// [registerVerify] succeeds; the backend derives the Amrita email from the
+  /// roll number and returns it, and that is where the OTP is sent.
+  static Future<String> registerStart({
     required String collegeId,
     required String name,
-    required String email,
     required String phone,
     required String password,
-    String? role,
   }) async {
     final res = await http.post(
-      _u('/users/add'),
+      _u('/auth/register/start'),
       headers: await _headers(),
       body: jsonEncode({
         'collegeId': collegeId,
         'name': name,
-        'email': email,
         'phone': phone,
         'password': password,
-        if (role != null) 'role': role,
       }),
     );
     final data = _unwrap(res) as Map<String, dynamic>;
-    return data['userId'].toString();
+    return (data['email'] ?? '').toString();
   }
 
-  static Future<void> verifyEmail(String email, String otp) async {
+  /// Verifies the signup OTP. The backend creates the account and signs the
+  /// user straight in — same body as [login]: `{accessToken, refreshToken, userId}`.
+  static Future<Map<String, dynamic>> registerVerify({
+    required String collegeId,
+    required String otp,
+  }) async {
     final res = await http.post(
-      _u('/auth/verify-email'),
+      _u('/auth/register/verify'),
       headers: await _headers(),
-      body: jsonEncode({'email': email, 'otp': otp}),
+      body: jsonEncode({'collegeId': collegeId, 'otp': otp}),
     );
-    _unwrap(res);
+    return _unwrap(res) as Map<String, dynamic>;
   }
 
-  static Future<void> resendVerification(String email) async {
+  static Future<void> registerResend(String collegeId) async {
     final res = await http.post(
-      _u('/auth/resend-verification'),
+      _u('/auth/register/resend'),
       headers: await _headers(),
-      body: jsonEncode({'email': email}),
+      body: jsonEncode({'collegeId': collegeId}),
     );
     _unwrap(res);
   }
