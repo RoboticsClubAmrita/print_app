@@ -1,14 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:showcaseview/showcaseview.dart';
 import '../services/session_store.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/bottom_nav.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
-import '../widgets/showcase_next_button.dart';
+import '../widgets/coach_tour.dart';
 import 'billing_screen.dart';
 import 'edit_profile_screen.dart';
 import 'home_screen.dart';
@@ -56,7 +55,6 @@ class _ShellScreenState extends State<ShellScreen>
     WidgetsBinding.instance.addObserver(this);
     _pollTimer = Timer.periodic(_pollInterval, (_) => _pollOrders());
 
-    TourCoordinator.onFinish = _onTourFinish;
     TourCoordinator.onReplay = _replayTour;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
@@ -65,7 +63,7 @@ class _ShellScreenState extends State<ShellScreen>
       if (seen || !mounted) return;
       // Mark it the moment the tour is *shown*, not when it completes.
       // Marking on completion meant backgrounding the app, killing it, or
-      // dismissing the showcase mid-way left the flag unset, so the tour
+      // dismissing the walkthrough mid-way left the flag unset, so the tour
       // ran again at every launch.
       await SessionStore.markTourSeen('tour', userId: userId);
       if (!mounted) return;
@@ -75,7 +73,7 @@ class _ShellScreenState extends State<ShellScreen>
 
   /// Replay on demand (Profile -> About PrintEase). The coach marks live on
   /// the Home tab, so switch there first and wait for it to mount before the
-  /// showcase tries to measure its targets.
+  /// walkthrough tries to measure its targets.
   void _replayTour() {
     _selectTab(0);
     _startTourWhenHomeReady();
@@ -95,19 +93,29 @@ class _ShellScreenState extends State<ShellScreen>
   /// Frames to wait for the Home tab before giving up on a replay.
   static const _tourStartAttempts = 10;
 
-  void _startFullTour() {
+  bool _tourRunning = false;
+
+  /// Runs the website's walkthrough (same steps, same copy, same order).
+  /// Done → welcome dialog; ✕ / back → just closes, like the website.
+  Future<void> _startFullTour() async {
     final home = _homeKey.currentState;
-    if (home == null) return;
+    if (home == null || _tourRunning) return;
 
-    final keys = <GlobalKey>[
-      ...home.tourKeys,
-      _tourBottomNav,
+    final targets = {...home.tourTargets, 'tour-nav': _tourBottomNav};
+    final steps = [
+      for (final id in tourOrder)
+        if (targets[id] != null)
+          TourStep(
+            target: targets[id]!,
+            title: tourCopy[id]!.$1,
+            description: tourCopy[id]!.$2,
+          ),
     ];
-    ShowCaseWidget.of(context).startShowCase(keys);
-  }
 
-  void _onTourFinish() {
-    _showWelcomeDialog();
+    _tourRunning = true;
+    final result = await CoachTour.show(context, steps);
+    _tourRunning = false;
+    if (result == TourResult.finished) _showWelcomeDialog();
   }
 
   Future<void> _showWelcomeDialog() async {
@@ -173,9 +181,6 @@ class _ShellScreenState extends State<ShellScreen>
     _pollTimer?.cancel();
     _tabCurve.dispose();
     _tabAnim.dispose();
-    if (TourCoordinator.onFinish == _onTourFinish) {
-      TourCoordinator.onFinish = null;
-    }
     if (TourCoordinator.onReplay == _replayTour) {
       TourCoordinator.onReplay = null;
     }
@@ -252,14 +257,8 @@ class _ShellScreenState extends State<ShellScreen>
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.fromLTRB(24, 0, 24, 18),
         child: SafeArea(
-          child: AppShowcase(
+          child: KeyedSubtree(
             key: _tourBottomNav,
-            title: 'Switch Between Tabs',
-            targetShapeBorder: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(Radius.circular(30)),
-            ),
-            tooltipActions: nextTooltipActions(context, step: 10, total: 10),
-            tooltipActionConfig: tooltipNextActionConfig,
             child: FloatingBottomNav(index: _index, onTap: _selectTab),
           ),
         ),
@@ -638,7 +637,7 @@ class ProfileTabState extends State<ProfileTab> {
                   label: const Text('Replay walkthrough'),
                   onPressed: () {
                     // Close the sheet first: the tour highlights widgets
-                    // behind it, and the shell owns the showcase.
+                    // behind it, and the shell owns the walkthrough.
                     Navigator.of(sheetContext).pop();
                     TourCoordinator.onReplay?.call();
                   },

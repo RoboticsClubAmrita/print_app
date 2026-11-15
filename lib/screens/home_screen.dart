@@ -25,7 +25,6 @@ import '../widgets/fx.dart';
 import '../widgets/pill_toggle.dart';
 import 'order_detail_screen.dart';
 import 'print_preview_screen.dart';
-import '../widgets/showcase_next_button.dart';
 
 class HomeTab extends StatefulWidget {
   final VoidCallback onViewOrders;
@@ -85,12 +84,9 @@ class HomeTabState extends State<HomeTab> {
   final _tourPrintTime = GlobalKey();
   final _tourTotal = GlobalKey();
   final _tourPlaceOrder = GlobalKey();
-  final _tourTodaysPrints = GlobalKey();
 
-  // Every showcase step scrolls the page to bring its target into view
-  // before highlighting it, so steps further down (Estimated Total, Place
-  // Order, etc.) are always reachable regardless of scroll position when
-  // the tour starts.
+  // Every walkthrough step scrolls its target into view (CoachTour), so
+  // steps further down (Estimated Total, Place Order) are always reachable.
 
   final _scrollController = ScrollController();
 
@@ -123,20 +119,18 @@ class HomeTabState extends State<HomeTab> {
     return printCost(pages: _selectedPageCount, copies: _copies, side: _side, rate: rate);
   }
 
-  /// Showcase keys in tour order, contributed to the single combined tour
-  /// list assembled by [ShellScreen._startFullTour]. The bottom-nav coach
-  /// mark is owned by [ShellScreen] itself and inserted right after these.
-  List<GlobalKey> get tourKeys => [
-        _tourLocation,
-        _tourToggle,
-        _tourDocument,
-        _tourPages,
-        _tourCopies,
-        _tourPrintTime,
-        _tourTotal,
-        _tourPlaceOrder,
-        _tourTodaysPrints,
-      ];
+  /// Walkthrough targets on this tab, by the website's step ids
+  /// (see `tourOrder` in coach_tour.dart). [ShellScreen] adds `tour-nav`.
+  Map<String, GlobalKey> get tourTargets => {
+        'tour-upload': _tourDocument,
+        'tour-side': _tourToggle,
+        'tour-pages': _tourPages,
+        'tour-copies': _tourCopies,
+        'tour-schedule': _tourPrintTime,
+        'tour-location': _tourLocation,
+        'tour-total': _tourTotal,
+        'tour-submit': _tourPlaceOrder,
+      };
 
   Future<void> _pickPageRange() async {
     if (_detectedPages == null) return;
@@ -907,16 +901,7 @@ class HomeTabState extends State<HomeTab> {
         const SizedBox(height: 18),
         FadeSlideIn(
             delay: const Duration(milliseconds: 200),
-            child: AppShowcase(
-              key: _tourTodaysPrints,
-              title: "Today's Prints",
-              targetShapeBorder: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.all(Radius.circular(24)),
-              ),
-              tooltipActions: nextTooltipActions(context, step: 9, total: 10),
-              tooltipActionConfig: tooltipNextActionConfig,
-              child: _todaySection(state),
-            ),
+            child: _todaySection(state),
           ),
       ],
     );
@@ -956,16 +941,9 @@ class HomeTabState extends State<HomeTab> {
                 children: [
                   Row(
                     children: [
-                      AppShowcase(
-                        key: _tourLocation,
-                        title: 'Choose Your Location',
-                        targetShapeBorder: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(24)),
-                        ),
-                        tooltipActions:
-                            nextTooltipActions(context, step: 1, total: 10),
-                        tooltipActionConfig: tooltipNextActionConfig,
-                        child: Pressable(
+                      KeyedSubtree(
+            key: _tourLocation,
+            child: Pressable(
                           onTap: _pickLocation,
                           child: Container(
                             padding: const EdgeInsets.symmetric(
@@ -1127,14 +1105,8 @@ class HomeTabState extends State<HomeTab> {
             ],
           ),
           const SizedBox(height: 18),
-          AppShowcase(
+          KeyedSubtree(
             key: _tourToggle,
-            title: 'Single or Double-Sided',
-            targetShapeBorder: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(Radius.circular(30)),
-            ),
-            tooltipActions: nextTooltipActions(context, step: 2, total: 10),
-            tooltipActionConfig: tooltipNextActionConfig,
             child: PillToggle(
               options: const ['Single-sided', 'Double-sided'],
               selectedIndex: _sideIndex,
@@ -1176,14 +1148,8 @@ class HomeTabState extends State<HomeTab> {
                   'nothing here gets submitted for real.',
               onDismiss: () => setState(() => _demoHintDismissed = true),
             ),
-          AppShowcase(
+          KeyedSubtree(
             key: _tourDocument,
-            title: 'Upload Your Document',
-            targetShapeBorder: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(Radius.circular(22)),
-            ),
-            tooltipActions: nextTooltipActions(context, step: 3, total: 10),
-            tooltipActionConfig: tooltipNextActionConfig,
             child: AnimatedGlowBorder(
               active: _uploading,
               radius: 22,
@@ -1226,15 +1192,9 @@ class HomeTabState extends State<HomeTab> {
           Row(
             children: [
               Expanded(
-                child: AppShowcase(
-                  key: _tourPages,
-                  title: 'Pick Specific Pages',
-                  targetShapeBorder: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(22)),
-                  ),
-                  tooltipActions: nextTooltipActions(context, step: 4, total: 10),
-                  tooltipActionConfig: tooltipNextActionConfig,
-                  child: FieldChip(
+                child: KeyedSubtree(
+            key: _tourPages,
+            child: FieldChip(
                     label: 'Pages',
                     value: _uploading
                         ? 'Counting…'
@@ -1251,15 +1211,9 @@ class HomeTabState extends State<HomeTab> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: AppShowcase(
-                  key: _tourCopies,
-                  title: 'Set Your Copies',
-                  targetShapeBorder: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(22)),
-                  ),
-                  tooltipActions: nextTooltipActions(context, step: 5, total: 10),
-                  tooltipActionConfig: tooltipNextActionConfig,
-                  child: StepperChip(
+                child: KeyedSubtree(
+            key: _tourCopies,
+            child: StepperChip(
                     label: 'Copies',
                     value: _copies,
                     onChanged: (v) => setState(() => _copies = v),
@@ -1284,14 +1238,8 @@ class HomeTabState extends State<HomeTab> {
             ),
           ],
           const SizedBox(height: 12),
-          AppShowcase(
+          KeyedSubtree(
             key: _tourPrintTime,
-            title: 'Choose When to Print',
-            targetShapeBorder: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(Radius.circular(22)),
-            ),
-            tooltipActions: nextTooltipActions(context, step: 6, total: 10),
-            tooltipActionConfig: tooltipNextActionConfig,
             child: FieldChip(
               label: 'Print Time',
               value: schedLabel,
@@ -1300,14 +1248,8 @@ class HomeTabState extends State<HomeTab> {
             ),
           ),
           const SizedBox(height: 16),
-          AppShowcase(
+          KeyedSubtree(
             key: _tourTotal,
-            title: 'Estimated Total',
-            targetShapeBorder: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(Radius.circular(20)),
-            ),
-            tooltipActions: nextTooltipActions(context, step: 7, total: 10),
-            tooltipActionConfig: tooltipNextActionConfig,
             child: Container(
               padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
               decoration: BoxDecoration(
@@ -1364,14 +1306,8 @@ class HomeTabState extends State<HomeTab> {
             ),
           ),
           const SizedBox(height: 14),
-          AppShowcase(
+          KeyedSubtree(
             key: _tourPlaceOrder,
-            title: 'Place Your Order',
-            targetShapeBorder: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(Radius.circular(16)),
-            ),
-            tooltipActions: nextTooltipActions(context, step: 8, total: 10),
-            tooltipActionConfig: tooltipNextActionConfig,
             child: FilledButton(
               onPressed: (_placing || _uploading) ? null : _placeOrder,
               child: _placing
