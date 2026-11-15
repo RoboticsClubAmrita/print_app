@@ -150,22 +150,28 @@ class ApiClient {
   }
 
   /// Starts pending-until-verified signup. No account exists until
-  /// [registerVerify] succeeds; the backend derives the Amrita email from the
-  /// roll number and returns it, and that is where the OTP is sent.
+  /// [registerVerify] succeeds. Students ([role] `STUDENT`) send only their
+  /// roll number and the backend derives the Amrita email; staff
+  /// (`FACULTY`) send their staff ID plus their own Amrita [email]. The
+  /// address the OTP went to is returned.
   static Future<String> registerStart({
     required String collegeId,
     required String name,
     required String phone,
     required String password,
+    String role = 'STUDENT',
+    String? email,
   }) async {
     final res = await http.post(
       _u('/auth/register/start'),
       headers: await _headers(),
       body: jsonEncode({
+        'role': role,
         'collegeId': collegeId,
         'name': name,
         'phone': phone,
         'password': password,
+        if (email != null) 'email': email,
       }),
     );
     final data = _unwrap(res) as Map<String, dynamic>;

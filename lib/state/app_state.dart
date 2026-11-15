@@ -209,18 +209,22 @@ class AppState extends ChangeNotifier {
   }
 
   /// Starts signup. Returns `(error, email)`: on success `error` is null and
-  /// `email` is the Amrita address the backend derived from the roll number —
-  /// the one the OTP was sent to. No account exists until [verifyRegistration].
+  /// `email` is the address the OTP was sent to — derived from the roll number
+  /// for a student, the given [staffEmail] for staff. No account exists until
+  /// [verifyRegistration].
   Future<({String? error, String? email})> register({
     required String name,
     required String collegeId,
     required String phone,
     required String password,
+    bool isStaff = false,
+    String? staffEmail,
   }) async {
     if (name.trim().isEmpty ||
         collegeId.trim().isEmpty ||
         phone.trim().isEmpty ||
-        password.isEmpty) {
+        password.isEmpty ||
+        (isStaff && (staffEmail ?? '').trim().isEmpty)) {
       return (error: 'Fill in all fields to register', email: null);
     }
     try {
@@ -229,6 +233,8 @@ class AppState extends ChangeNotifier {
         name: name.trim(),
         phone: phone.trim(),
         password: password,
+        role: isStaff ? 'FACULTY' : 'STUDENT',
+        email: isStaff ? staffEmail!.trim().toLowerCase() : null,
       );
       return (error: null, email: email);
     } on ApiException catch (e) {

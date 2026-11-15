@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../utils/validators.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
+import '../widgets/pill_toggle.dart';
 import 'otp_verification_screen.dart';
 import 'shell_screen.dart';
 
@@ -20,10 +21,16 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final _name = TextEditingController();
   final _collegeId = TextEditingController();
+  final _email = TextEditingController();
   final _phone = TextEditingController();
   final _password = TextEditingController();
   bool _obscure = true;
   bool _submitting = false;
+
+  /// 0 = Student (roll number; email derived), 1 = Staff (staff ID + own
+  /// Amrita email, stored as the FACULTY role).
+  int _roleIndex = 0;
+  bool get _isStaff => _roleIndex == 1;
 
   /// Must match the backend's /auth/register/resend cooldown, or an early
   /// resend is refused.
@@ -33,6 +40,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void dispose() {
     _name.dispose();
     _collegeId.dispose();
+    _email.dispose();
     _phone.dispose();
     _password.dispose();
     super.dispose();
@@ -40,7 +48,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   String? _validate() {
     if (_name.text.trim().isEmpty) return 'Enter your full name';
-    if (_collegeId.text.trim().isEmpty) return 'Enter your Roll Number';
+    if (_collegeId.text.trim().isEmpty) {
+      return _isStaff ? 'Enter your Staff ID' : 'Enter your Roll Number';
+    }
+    if (_isStaff) {
+      final email = _email.text.trim();
+      if (!Validators.isAmritaEmail(email)) {
+        return 'Use your Amrita staff email (@amrita.edu)';
+      }
+      if (Validators.isStudentEmail(email)) {
+        return 'That is a student email. Choose Student to sign up with your roll number.';
+      }
+    }
     if (!Validators.isValidPhone(_phone.text)) {
       return 'Enter a valid phone number';
     }
@@ -60,11 +79,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _submitting = true);
     final state = context.read<AppState>();
     final collegeId = _collegeId.text.trim().toUpperCase();
+    final isStaff = _isStaff;
     final result = await state.register(
       name: _name.text,
       collegeId: collegeId,
       phone: _phone.text,
       password: _password.text,
+      isStaff: isStaff,
+      staffEmail: isStaff ? _email.text : null,
     );
     if (!mounted) return;
     setState(() => _submitting = false);
@@ -86,7 +108,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         builder: (_) => OtpVerificationScreen(
           title: 'Verify your email',
           subtitle: 'Enter the 4-digit code sent to $sentTo.\n'
-              'Wrong roll number? Go back to change it.',
+              '${isStaff ? 'Wrong email?' : 'Wrong roll number?'} Go back to change it.',
           verifyLabel: 'Verify email',
           successTitle: 'Email verified',
           successSubtitle: 'Welcome to PrintEase!',
@@ -170,10 +192,29 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       const Padding(
-                        padding: EdgeInsets.only(left: 4, bottom: 16),
+                        padding: EdgeInsets.only(left: 4, bottom: 8),
                         child: Text(
-                          'Join with your roll number — your Amrita email is set up automatically.',
+                          'I am a',
                           style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.2,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                      PillToggle(
+                        options: const ['Student', 'Staff'],
+                        selectedIndex: _roleIndex,
+                        onChanged: (i) => setState(() => _roleIndex = i),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 14, 4, 16),
+                        child: Text(
+                          _isStaff
+                              ? 'Join with your staff ID and Amrita email — we\'ll send the code there.'
+                              : 'Join with your roll number — your Amrita email is set up automatically.',
+                          style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                             color: AppColors.textSecondary,
@@ -197,13 +238,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         textCapitalization: TextCapitalization.characters,
                         style: AppTheme.fieldTextStyle,
                         decoration: AppTheme.fieldDecoration(
-                          label: 'Roll Number',
-                          hint: 'CB.SC.U4XXXXXX',
+                          label: _isStaff ? 'Staff ID' : 'Roll Number',
+                          hint: _isStaff ? 'Staff ID' : 'CB.SC.U4XXXXXX',
                           prefixIcon: const Icon(Icons.badge_outlined,
                               color: AppColors.black, size: 20),
                         ),
                       ),
                       const SizedBox(height: 14),
+                      if (_isStaff) ...[
+                        TextField(
+                          controller: _email,
+                          keyboardType: TextInputType.emailAddress,
+                          autocorrect: false,
+                          style: AppTheme.fieldTextStyle,
+                          decoration: AppTheme.fieldDecoration(
+                            label: 'Amrita Email',
+                            hint: 'you@cb.amrita.edu',
+                            prefixIcon: const Icon(Icons.mail_outline_rounded,
+                                color: AppColors.black, size: 20),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                      ],
                       TextField(
                         controller: _phone,
                         keyboardType: TextInputType.phone,

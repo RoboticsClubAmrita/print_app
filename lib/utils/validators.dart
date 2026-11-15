@@ -6,6 +6,16 @@ class Validators {
   static bool isValidEmailFormat(String email) =>
       _emailFormat.hasMatch(email.trim());
 
+  /// A student mailbox (…@*.students.amrita.edu). Staff must not sign up with
+  /// one — students register with their roll number instead.
+  static bool isStudentEmail(String email) {
+    final at = email.trim().toLowerCase().lastIndexOf('@');
+    if (at < 0) return false;
+    final domain = email.trim().toLowerCase().substring(at + 1);
+    return domain == 'students.amrita.edu' ||
+        domain.endsWith('.students.amrita.edu');
+  }
+
   /// Amrita institutional email: any address on the amrita.edu domain or one
   /// of its subdomains (e.g. cb.students.amrita.edu).
   static bool isAmritaEmail(String email) {
