@@ -1,543 +1,331 @@
 import 'package:flutter/material.dart';
-
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../data/pricing.dart';
 import '../models/print_order.dart';
-import '../services/api_client.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/bottom_nav.dart';
-import '../widgets/dot_grid.dart';
 import '../widgets/fx.dart';
+import '../widgets/status_chip.dart';
+import '../widgets/ticket_card.dart';
+import 'order_detail_screen.dart';
 
-/// Orders tab: show the user’s recent print jobs and their current state.
+/// The Orders tab, laid out like the website's Orders page
+/// (print_integrated `src/user/pages/app/orders/OrdersPage.tsx`):
+/// "Your prints" eyebrow, title + refresh, Active / History underline tabs
+/// with counts, and a boarding-pass ticket per order.
+///
+/// (Until 2026-11-20 this tab rendered a stale copy of the Billing page.)
 class OrdersTab extends StatefulWidget {
   final bool demoMode;
   final VoidCallback? onDemoComplete;
+
   const OrdersTab({super.key, this.demoMode = false, this.onDemoComplete});
 
   @override
   State<OrdersTab> createState() => OrdersTabState();
 }
 
+enum _OrdersView { active, history }
+
 class OrdersTabState extends State<OrdersTab> {
-  bool _paying = false;
-  bool _payingDues = false;
-  bool _breakdownExpanded = false;
+  _OrdersView _view = _OrdersView.active;
+  bool _refreshing = false;
 
-  @override
-  void initState() {
-    super.initState();
-    context.read<AppState>().loadPenalties();
-  }
+  /// Two ticket columns from this width up, like the website's `sm:grid-cols-2`.
+  static const _twoColumnWidth = 640.0;
+  static const _gap = 14.0;
 
-  Future<void> _payDues(AppState state) async {
-    if (_payingDues) return;
-    setState(() => _payingDues = true);
+  Future<void> _refresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
     try {
-      final paidAmount = await state.payOutstandingDues();
-      if (!mounted) return;
-      await showSuccessOverlay(
-        context,
-        title: 'Dues Cleared',
-        subtitle: '${rupees(paidAmount.round())} paid — you are all set.',
-        icon: Icons.account_balance_wallet_rounded,
-      );
-    } catch (e) {
+      await context.read<AppState>().refreshOrders();
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e is ApiException ? e.message : 'Payment failed')),
+          const SnackBar(content: Text('Could not refresh your orders. Check your connection.')),
         );
       }
     } finally {
-      if (mounted) setState(() => _payingDues = false);
+      if (mounted) setState(() => _refreshing = false);
     }
   }
 
-  Future<void> _payAllDue(AppState state) async {
-    if (_paying) return;
-    setState(() => _paying = true);
-
-    if (widget.demoMode) {
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-      if (!mounted) return;
-      state.markDemoOrderPaid();
-      await showSuccessOverlay(
-        context,
-        title: 'Payment Successful',
-        subtitle: 'Demo payment complete — you are all set.',
-        icon: Icons.account_balance_wallet_rounded,
-      );
-      if (mounted) setState(() => _paying = false);
-      widget.onDemoComplete?.call();
-      return;
-    }
-
-    try {
-      final unpaid = List<PrintOrder>.from(state.unpaidOrders);
-      num cleared = 0;
-      final undelivered = <String>[];
-      for (final order in unpaid) {
-        // Pays and then sends the document each order has been holding on this
-        // device since it was placed — see AppState.payForOrder.
-        final paid = await state.payForOrder(order);
-        final problem = paid.uploadProblem;
-        if (problem != null) undelivered.add('${order.fileName}: $problem');
-        // The amount the server charged, not this order's cached total: an
-        // outstanding balance is rolled into every unpaid order's snapshot,
-        // so summing those would report the same dues once per order.
-        cleared += paid.amountPaid;
-      }
-      if (!mounted) return;
-      await showSuccessOverlay(
-        context,
-        title: 'Payment Successful',
-        subtitle: '${rupees(cleared.round())} cleared — you are all set.',
-        icon: Icons.account_balance_wallet_rounded,
-      );
-      if (undelivered.isNotEmpty && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Still sending: ${undelivered.join('; ')}')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e is ApiException ? e.message : 'Payment failed')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _paying = false);
-    }
+  void _open(PrintOrder order) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: order.id)),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final unpaid = state.unpaidOrders;
-    final paid = state.paidOrders;
+    final active = state.activeOrders;
+    final history = state.historyOrders;
+    final shown = _view == _OrdersView.active ? active : history;
 
     return SafeArea(
       bottom: false,
-      child: ListView(
-        // Derived so the last card clears the floating dock on any screen,
-        // rather than a fixed guess that leaves it half-hidden.
-        padding: EdgeInsets.fromLTRB(
-          20,
-          12,
-          20,
-          bottomNavScrollClearance(context),
-        ),
-        children: [
-          const FadeSlideIn(
-            child: Text(
-              'Billing',
-              style: TextStyle(
-                fontSize: 30,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.6,
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          const FadeSlideIn(
-            delay: Duration(milliseconds: 40),
-            child: Text(
-              'Order-wise costs and dues',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
-            ),
-          ),
-          const SizedBox(height: 20),
-          FadeSlideIn(
-            delay: const Duration(milliseconds: 90),
-            child: _statementCard(context, state, unpaid.length),
-          ),
-          if (state.outstandingDues > 0) ...[
-            const SizedBox(height: 16),
-            FadeSlideIn(
-              delay: const Duration(milliseconds: 120),
-              child: _duesCard(state),
-            ),
-          ],
-          if (unpaid.isNotEmpty) ...[
+      child: RefreshIndicator(
+        color: AppColors.black,
+        onRefresh: _refresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.fromLTRB(20, 12, 20, bottomNavScrollClearance(context)),
+          children: [
+            FadeSlideIn(child: _header()),
             const SizedBox(height: 26),
             FadeSlideIn(
-              delay: const Duration(milliseconds: 160),
-              child: Pressable(
-                onTap: () => setState(() => _breakdownExpanded = !_breakdownExpanded),
-                child: Row(
-                  children: [
-                    const Text(
-                      'Cost Breakdown',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(width: 6),
-                    AnimatedRotation(
-                      turns: _breakdownExpanded ? 0.5 : 0,
-                      duration: AppMotion.fast,
-                      curve: AppMotion.ease,
-                      child: const Icon(
-                        Icons.keyboard_arrow_down_rounded,
-                        size: 24,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${unpaid.length} order${unpaid.length > 1 ? 's' : ''}',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              delay: const Duration(milliseconds: 60),
+              child: _tabs(active.length, history.length),
             ),
-            AnimatedCrossFade(
-              firstChild: const SizedBox.shrink(),
-              secondChild: Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Column(
-                  children: [
-                    for (var i = 0; i < unpaid.length; i++) ...[
-                      _breakdownCard(unpaid[i]),
-                      if (i < unpaid.length - 1) const SizedBox(height: 12),
+            const SizedBox(height: 22),
+            if (shown.isEmpty)
+              FadeSlideIn(
+                key: ValueKey('empty-$_view'),
+                delay: const Duration(milliseconds: 100),
+                child: _emptyState(state),
+              )
+            else
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final columns = constraints.maxWidth >= _twoColumnWidth ? 2 : 1;
+                  final width = (constraints.maxWidth - _gap * (columns - 1)) / columns;
+                  return Wrap(
+                    key: ValueKey(_view),
+                    spacing: _gap,
+                    runSpacing: _gap,
+                    children: [
+                      for (var i = 0; i < shown.length; i++)
+                        SizedBox(
+                          width: width,
+                          child: FadeSlideIn(
+                            delay: Duration(milliseconds: 80 + 50 * i.clamp(0, 8)),
+                            child: _OrderTicket(order: shown[i], onTap: () => _open(shown[i])),
+                          ),
+                        ),
                     ],
-                  ],
-                ),
+                  );
+                },
               ),
-              crossFadeState: _breakdownExpanded
-                  ? CrossFadeState.showSecond
-                  : CrossFadeState.showFirst,
-              duration: AppMotion.normal,
-              sizeCurve: AppMotion.ease,
-            ),
           ],
-          const SizedBox(height: 14),
-          FadeSlideIn(
-            delay: const Duration(milliseconds: 240),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Payment History',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 12),
-                if (paid.isEmpty)
-                  FadeSlideIn(
-                    delay: const Duration(milliseconds: 280),
-                    child: Container(
-                      padding: const EdgeInsets.all(18),
-                      decoration: AppDecor.card(radius: 22),
-                      child: const Row(
-                        children: [
-                          Icon(
-                            Icons.receipt_long_outlined,
-                            size: 20,
-                            color: AppColors.textSecondary,
-                          ),
-                          SizedBox(width: 12),
-                          Text(
-                            'No payments yet.',
-                            style: TextStyle(color: AppColors.textSecondary),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  for (var i = 0; i < paid.length; i++) ...[
-                    FadeSlideIn(
-                      delay: Duration(milliseconds: 280 + 40 * (i < 6 ? i : 6)),
-                      child: _historyRow(paid[i]),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _statementCard(BuildContext context, AppState state, int unpaidCount) {
-    return Container(
-      decoration: AppDecor.darkPanel(),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(28),
-        child: Stack(
-          children: [
-            const Positioned.fill(
-              child: DotGrid(color: Colors.white10, spacing: 24, radius: 1.2),
-            ),
-            Positioned(
-              right: -28,
-              bottom: -30,
-              child: Icon(
-                Icons.account_balance_wallet_rounded,
-                size: 150,
-                color: Colors.white.withValues(alpha: 0.05),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _header() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 8),
                   const Text(
-                    'TOTAL DUE',
+                    'YOUR PRINTS',
                     style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.4,
-                      color: Colors.white54,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  AnimatedCount(
-                    value: state.totalDue,
-                    format: rupees,
-                    style: const TextStyle(
-                      fontSize: 56,
-                      height: 1.05,
+                      fontSize: 11,
                       fontWeight: FontWeight.w800,
-                      color: AppColors.white,
-                      letterSpacing: -1,
-                      fontFamily: kFontFamily,
+                      letterSpacing: 2.4,
+                      color: AppColors.textSecondary,
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    unpaidCount == 0
-                        ? 'No pending payments — all clear ✨'
-                        : 'across $unpaidCount unpaid '
-                            'order${unpaidCount > 1 ? 's' : ''}',
-                    style: const TextStyle(color: Colors.white60, fontSize: 13),
-                  ),
-                  const SizedBox(height: 20),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.white,
-                      foregroundColor: AppColors.black,
-                      disabledBackgroundColor:
-                          Colors.white.withValues(alpha: 0.16),
-                      disabledForegroundColor: Colors.white38,
-                    ),
-                    onPressed: state.totalDue == 0 || _paying
-                        ? null
-                        : () => _payAllDue(state),
-                    child: _paying
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Pay Now'),
                   ),
                 ],
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _duesCard(AppState state) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.warning_amber_rounded,
-                  size: 20, color: AppColors.warning),
-              const SizedBox(width: 8),
+              const SizedBox(height: 8),
               const Text(
-                'Outstanding Dues',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-              ),
-              const Spacer(),
-              Text(
-                rupees(state.outstandingDues.round()),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                'Orders',
+                style: TextStyle(
+                  fontSize: 30,
+                  height: 1,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.8,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          const Text(
-            'Storage fees from uncollected prints left in a stack past the '
-            'free window.',
-            style: TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.4),
+        ),
+        Pressable(
+          onTap: _refreshing ? null : _refresh,
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Center(
+              child: _refreshing
+                  ? const SizedBox(
+                      width: 17,
+                      height: 17,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textSecondary),
+                    )
+                  : const Icon(Icons.refresh_rounded, size: 21, color: AppColors.textSecondary),
+            ),
           ),
-          if (state.penalties.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            for (final p in state.penalties)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        (p['referenceId'] ?? 'Print job').toString(),
-                        style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
-                      ),
+        ),
+      ],
+    );
+  }
+
+  Widget _tabs(int activeCount, int historyCount) {
+    Widget tab(_OrdersView view, String label, int count) {
+      final selected = _view == view;
+      return Pressable(
+        onTap: () => setState(() => _view = view),
+        child: Padding(
+          padding: const EdgeInsets.only(right: 28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  AnimatedDefaultTextStyle(
+                    duration: AppMotion.fast,
+                    style: TextStyle(
+                      fontFamily: kFontFamily,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.1,
+                      color: selected ? AppColors.black : AppColors.textSecondary,
                     ),
-                    Text(
-                      rupees((((p['amount'] as num?) ?? 0) - ((p['settledAmount'] as num?) ?? 0)).round()),
-                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                    child: Text(label),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '$count',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                      color: AppColors.textSecondary.withValues(alpha: selected ? 1 : 0.6),
                     ),
-                  ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              AnimatedContainer(
+                duration: AppMotion.normal,
+                curve: AppMotion.ease,
+                height: 2,
+                width: selected ? 52 : 0,
+                decoration: BoxDecoration(
+                  color: AppColors.black,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-          ],
-          const SizedBox(height: 14),
-          FilledButton(
-            onPressed: _payingDues ? null : () => _payDues(state),
-            child: _payingDues
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
-                  )
-                : const Text('Pay Dues'),
+            ],
           ),
+        ),
+      );
+    }
+
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppColors.border)),
+      ),
+      child: Row(
+        children: [
+          tab(_OrdersView.active, 'Active', activeCount),
+          tab(_OrdersView.history, 'History', historyCount),
         ],
       ),
     );
   }
 
-  Widget _breakdownCard(PrintOrder o) {
+  Widget _emptyState(AppState state) {
+    final isActive = _view == _OrdersView.active;
     return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: AppDecor.card(),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+      decoration: AppDecor.card(radius: 26),
+      child: Column(
         children: [
           Container(
-            width: 42,
-            height: 42,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppColors.chip,
-              borderRadius: BorderRadius.circular(13),
+            width: 52,
+            height: 52,
+            decoration: const BoxDecoration(color: AppColors.chip, shape: BoxShape.circle),
+            child: Icon(
+              isActive ? Icons.inbox_outlined : Icons.inventory_2_outlined,
+              size: 24,
+              color: AppColors.black,
             ),
-            child: const Icon(Icons.description_outlined, size: 20),
           ),
-          const SizedBox(width: 13),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        o.fileName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    // A demo order sits in this list beside real ones. Without
-                    // a marker there is nothing on the card to say it is not
-                    // a job someone actually has to collect and pay for.
-                    if (o.jobId == AppState.kDemoJobId) ...[
-                      const SizedBox(width: 7),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppColors.black,
-                          borderRadius: BorderRadius.circular(7),
-                        ),
-                        child: const Text(
-                          'DEMO',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 0.6,
-                            color: AppColors.white,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
+          const SizedBox(height: 14),
+          Text(
+            isActive ? 'Nothing printing right now' : 'No collected orders yet',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+          if (isActive) ...[
+            const SizedBox(height: 6),
+            const Text(
+              'Start a print and track it here.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 18),
+            ElevatedButton(
+              onPressed: () => state.requestTab(0),
+              child: const Text('Start a print'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Boarding-pass ticket for one order, matching the website's `OrderTicket`.
+class _OrderTicket extends StatelessWidget {
+  final PrintOrder order;
+  final VoidCallback onTap;
+
+  const _OrderTicket({required this.order, required this.onTap});
+
+  static final _date = DateFormat('MMM d');
+
+  bool get _isImage {
+    final name = order.fileName.toLowerCase();
+    return name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TicketCard(
+      notchColor: AppColors.bg,
+      onTap: onTap,
+      top: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: AppColors.black,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.black.withValues(alpha: 0.25),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  '${o.pages} pages × ${o.copies} '
-                  '${o.copies > 1 ? 'copies' : 'copy'} • ${o.side.label}',
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  o.costPerPage > 0 ? 'at ${rateLabel(o.costPerPage, o.side)}' : '',
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-                if (o.balanceApplied > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      '+ ${rupees(o.balanceApplied.round())} carried-over balance',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
               ],
             ),
-          ),
-          const SizedBox(width: 10),
-          Text(
-            rupees(o.cost),
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _historyRow(PrintOrder o) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-      decoration: AppDecor.card(radius: 22),
-      child: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppColors.success.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.check_rounded,
-              size: 18,
-              color: AppColors.success,
+            child: Icon(
+              _isImage ? Icons.image_outlined : Icons.description_outlined,
+              size: 20,
+              color: AppColors.white,
             ),
           ),
           const SizedBox(width: 12),
@@ -545,55 +333,112 @@ class OrdersTabState extends State<OrdersTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        o.fileName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (o.jobId == AppState.kDemoJobId) ...[
-                      const SizedBox(width: 7),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppColors.black,
-                          borderRadius: BorderRadius.circular(7),
-                        ),
-                        child: const Text(
-                          'DEMO',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 0.6,
-                            color: AppColors.white,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 3),
                 Text(
-                  DateFormat('MMM d, yyyy').format(o.createdAt),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
+                  order.fileName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${order.id} • ${order.fileSizeKb} KB',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
                 ),
               ],
             ),
           ),
-          Text(
-            rupees(o.cost),
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+          const SizedBox(width: 8),
+          StatusChip(status: order.status),
+        ],
+      ),
+      bottom: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _MetaChip(_date.format(order.scheduledFor ?? order.createdAt)),
+                  _MetaChip('${order.pages} pg × ${order.copies}'),
+                  _MetaChip(order.side == PrintSide.single ? '1-side' : '2-side'),
+                ],
+              ),
+            ),
           ),
+          const SizedBox(width: 10),
+          _Barcode(seed: order.id),
+          const SizedBox(width: 12),
+          Text(
+            rupees(order.cost),
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetaChip extends StatelessWidget {
+  final String label;
+
+  const _MetaChip(this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(right: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border.withValues(alpha: 0.8)),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: AppColors.textSecondary,
+        ),
+      ),
+    );
+  }
+}
+
+/// Deterministic mini barcode drawn from the order id, the same 18 bars the
+/// website draws, so a ticket looks identical on both.
+class _Barcode extends StatelessWidget {
+  final String seed;
+
+  const _Barcode({required this.seed});
+
+  @override
+  Widget build(BuildContext context) {
+    final units = seed.isEmpty ? [0] : seed.codeUnits;
+    return SizedBox(
+      height: 20,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < 18; i++) ...[
+            if (i > 0) const SizedBox(width: 2),
+            Builder(builder: (_) {
+              final code = units[i % units.length] + i * 7;
+              return Container(
+                width: code % 3 == 0 ? 3 : 1.5,
+                decoration: BoxDecoration(
+                  color: AppColors.black.withValues(alpha: code % 4 == 0 ? 0.25 : 0.75),
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              );
+            }),
+          ],
         ],
       ),
     );

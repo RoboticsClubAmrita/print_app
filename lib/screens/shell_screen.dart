@@ -222,7 +222,7 @@ class _ShellScreenState extends State<ShellScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       extendBody: true,
-      backgroundColor: _index == 1 ? AppColors.black : AppColors.bg,
+      backgroundColor: AppColors.bg,
       // The demo bar is part of the layout, not an overlay floating on top of
       // it — the same shape the web app uses. Sitting in the column means it
       // pushes the page down instead of covering its header.
