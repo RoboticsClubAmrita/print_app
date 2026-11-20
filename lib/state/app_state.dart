@@ -330,8 +330,23 @@ class AppState extends ChangeNotifier {
   /// could apply an older response over a newer one.
   Future<void>? _ordersRefresh;
 
-  Future<void> refreshOrders() =>
-      _ordersRefresh ??= _fetchOrders().whenComplete(() => _ordersRefresh = null);
+  Future<void> refreshOrders() {
+    final inFlight = _ordersRefresh;
+    if (inFlight == null) {
+      return _ordersRefresh = _fetchOrders().whenComplete(() => _ordersRefresh = null);
+    }
+    // A fetch already in flight was sent before whatever the caller just did
+    // (verified a collection, got a live "status changed" event), so its
+    // answer can be stale — joining it left "Request Collection" on screen
+    // after a successful OTP. Queue exactly one follow-up fetch instead;
+    // every caller arriving meanwhile shares it.
+    return _ordersFollowUp ??= inFlight.catchError((Object _) {}).then((_) {
+      _ordersFollowUp = null;
+      return refreshOrders();
+    });
+  }
+
+  Future<void>? _ordersFollowUp;
 
   Future<void> _fetchOrders() async {
     if (user == null) return;
@@ -340,6 +355,8 @@ class AppState extends ChangeNotifier {
         .cast<Map<String, dynamic>>()
         .map(PrintOrder.fromJob)
         .toList();
+    // Show the new statuses now; penalties below can fail independently.
+    notifyListeners();
     await _notifyStatusChanges();
     await loadPenalties();
 
@@ -569,8 +586,12 @@ class AppState extends ChangeNotifier {
   /// material was sitting in, so the UI can tell the user where to look.
   Future<String> confirmCollection(PrintOrder order, String otp) async {
     final stackName = await ApiClient.verifyCollect(order.jobId, otp);
-    await refreshOrders();
-    return stackName;
+    // The collection is committed. A failed refetch must not be reported as a
+    // failed collection; the live feed or the next poll reconciles.
+    await refreshOrders().catchError((Object e) {
+      debugPrint('Refresh after collection failed: $e');
+    });
+    return stackName.isNotEmpty ? stackName : (order.stackName ?? '');
   }
 
   /// Cancels an order. The backend refuses once printing has started; the

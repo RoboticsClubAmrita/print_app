@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/session_store.dart';
+import '../services/job_event_stream.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/bottom_nav.dart';
@@ -46,6 +47,10 @@ class _ShellScreenState extends State<ShellScreen>
   Timer? _pollTimer;
   late final AppState _appState;
 
+  /// Pushes job changes the moment they commit, so "printing" / "ready"
+  /// notifications fire immediately instead of on the next 20 s poll.
+  late final JobEventStream _jobEvents = JobEventStream(onChange: _pollOrders);
+
   @override
   void initState() {
     super.initState();
@@ -54,6 +59,7 @@ class _ShellScreenState extends State<ShellScreen>
     _appState.tabRequest.addListener(_onTabRequest);
     WidgetsBinding.instance.addObserver(this);
     _pollTimer = Timer.periodic(_pollInterval, (_) => _pollOrders());
+    _jobEvents.start();
 
     TourCoordinator.onReplay = _replayTour;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -153,8 +159,8 @@ class _ShellScreenState extends State<ShellScreen>
     }
   }
 
-  /// Matches the web app's poll (`useLiveOrders`), so both clients see a
-  /// print move on in the same time.
+  /// Safety-net poll, matching the web app's (`useLiveOrders`). The live feed
+  /// ([JobEventStream]) is what makes updates instant.
   static const _pollInterval = Duration(seconds: 20);
 
   /// Statuses change on the print side, not from anything this app does.
@@ -170,7 +176,13 @@ class _ShellScreenState extends State<ShellScreen>
   /// to check on a print would otherwise wait up to a full interval.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _pollOrders();
+    if (state == AppLifecycleState.resumed) {
+      _pollOrders();
+      _jobEvents.start();
+    } else if (state == AppLifecycleState.paused) {
+      // No open sockets while backgrounded; resume refetches and reconnects.
+      _jobEvents.stop();
+    }
   }
 
   @override
@@ -179,6 +191,7 @@ class _ShellScreenState extends State<ShellScreen>
     _appState.removeListener(_onStateChange);
     _appState.tabRequest.removeListener(_onTabRequest);
     _pollTimer?.cancel();
+    _jobEvents.stop();
     _tabCurve.dispose();
     _tabAnim.dispose();
     if (TourCoordinator.onReplay == _replayTour) {

@@ -98,7 +98,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     setState(() => _busy = false);
 
     // The OTP screen owns verification and its own success animation; the
-    // stack refresh happens inside confirmCollection.
+    // stack refresh happens inside confirmCollection. The success popup
+    // names the stack the backend says the prints are sitting in.
+    String? collectedFrom;
     await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => OtpVerificationScreen(
@@ -108,11 +110,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           verifyLabel: 'Confirm collection',
           successTitle: 'Collection Confirmed',
           successSubtitle: 'Enjoy your prints!',
+          successSubtitleBuilder: () => (collectedFrom ?? '').isEmpty
+              ? null
+              : 'Collect your prints from Stack $collectedFrom.',
           successIcon: Icons.inventory_2_rounded,
           headerIcon: Icons.local_shipping_outlined,
           onVerify: (code) async {
             try {
-              await state.confirmCollection(order, code);
+              collectedFrom = await state.confirmCollection(order, code);
               return null;
             } on ApiException catch (e) {
               return e.message;

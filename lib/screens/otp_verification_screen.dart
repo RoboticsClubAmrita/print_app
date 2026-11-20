@@ -20,6 +20,11 @@ class OtpVerificationScreen extends StatefulWidget {
   final Future<String?> Function()? onResend;
   final String successTitle;
   final String? successSubtitle;
+
+  /// Builds the success subtitle after [onVerify] succeeds, for flows whose
+  /// message depends on the verification result (e.g. which stack to collect
+  /// from). Takes precedence over [successSubtitle].
+  final String? Function()? successSubtitleBuilder;
   final IconData successIcon;
   final IconData headerIcon;
   final int resendSeconds;
@@ -34,6 +39,7 @@ class OtpVerificationScreen extends StatefulWidget {
     this.verifyLabel = 'Verify',
     this.successTitle = 'Verified',
     this.successSubtitle,
+    this.successSubtitleBuilder,
     this.successIcon = Icons.verified_rounded,
     this.headerIcon = Icons.mark_email_read_outlined,
     this.resendSeconds = 30,
@@ -98,7 +104,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     await showSuccessOverlay(
       context,
       title: widget.successTitle,
-      subtitle: widget.successSubtitle,
+      subtitle: widget.successSubtitleBuilder?.call() ?? widget.successSubtitle,
       icon: widget.successIcon,
     );
     if (!mounted) return;

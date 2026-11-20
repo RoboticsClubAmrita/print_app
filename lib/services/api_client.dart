@@ -64,6 +64,13 @@ class ApiClient {
     return replay;
   }
 
+  /// Rotates the token pair (shared single-flight with every other caller).
+  /// Used by [JobEventStream], which makes its own streaming request.
+  static Future<bool> refreshSession() => _refreshSession();
+
+  /// Headers for an authenticated request made outside this class.
+  static Future<Map<String, String>> authHeaders() => _headers(json: false);
+
   static Future<bool> _refreshSession() {
     return _refreshing ??= _rotateTokens().whenComplete(() => _refreshing = null);
   }
