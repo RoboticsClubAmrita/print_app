@@ -201,3 +201,12 @@ class PrintOrder {
 
   String get colorModeLabel => colorMode == 'COLOR' ? 'Colour' : 'B&W';
 }
+
+/// "Stack A1" for a stack named "A1", but "Stack 2" (not "Stack Stack 2")
+/// for one the admin already named "Stack 2".
+String stackLabel(String name) {
+  final trimmed = name.trim();
+  return RegExp(r'^stack\b', caseSensitive: false).hasMatch(trimmed)
+      ? trimmed
+      : 'Stack $trimmed';
+}

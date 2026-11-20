@@ -112,7 +112,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           successSubtitle: 'Enjoy your prints!',
           successSubtitleBuilder: () => (collectedFrom ?? '').isEmpty
               ? null
-              : 'Collect your prints from Stack $collectedFrom.',
+              : 'Collect your prints from ${stackLabel(collectedFrom!)}.',
           successIcon: Icons.inventory_2_rounded,
           headerIcon: Icons.local_shipping_outlined,
           onVerify: (code) async {
@@ -670,7 +670,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Text(
-                  'Collect from Stack ${order.stackName}',
+                  'Collect from ${stackLabel(order.stackName!)}',
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                 ),
@@ -720,11 +720,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               const Icon(Icons.check_circle_rounded,
                   color: AppColors.success, size: 22),
               const SizedBox(width: 10),
-              Text(
-                order.collectedStackName != null
-                    ? 'Collected from Stack ${order.collectedStackName} — thank you!'
-                    : 'Collected — thank you!',
-                style: const TextStyle(fontWeight: FontWeight.w800),
+              // Flexible so a long stack name wraps instead of running off
+              // the card.
+              Flexible(
+                child: Text(
+                  order.collectedStackName != null
+                      ? 'Collected from ${stackLabel(order.collectedStackName!)} — thank you!'
+                      : 'Collected — thank you!',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
               ),
             ],
           ),

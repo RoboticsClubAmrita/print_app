@@ -381,6 +381,11 @@ class ProfileTabState extends State<ProfileTab> {
           FadeSlideIn(
             delay: const Duration(milliseconds: 300),
             child: OutlinedButton.icon(
+              // Red text/icon on the neutral outline, like the website.
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.danger,
+                overlayColor: AppColors.danger,
+              ),
               icon: const Icon(Icons.logout_rounded, size: 20),
               label: const Text('Log Out'),
               onPressed: () {
